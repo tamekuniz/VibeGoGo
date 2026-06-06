@@ -30,6 +30,12 @@ https://keepachangelog.com/en/1.1.0/
 
 ### Changed
 
+- Step 1 feature branch name is now derived from the agreed Step 0 Goal in
+  `{type}/{slug}` form (e.g., `feat/japanese-readme`) instead of the
+  `vibesdegogo/{id}` template. Both Claude and Codex editions of `SKILL.md`,
+  and `references/target_schema.md`, were updated. Nesting on top of an
+  existing feature branch is allowed; the Step 1 block runs once per session
+  because `vdgg_state_init` refuses a second initialization.
 - Hook `jq` missing-dependency UX is unified across Claude and Codex hooks.
   All hooks print a per-OS install hint and exit 2 (or 0 in the stop hook).
   The previous behavior that silently kicked off a background `brew install

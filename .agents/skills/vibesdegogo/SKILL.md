@@ -67,7 +67,13 @@ source "$VDGG_CODEX_SKILL_DIR/scripts/vdgg-state.sh"
 vdgg_state_init
 ```
 
-For the default `branch-pr` workflow, create a feature branch after initialization and before code edits:
+For the default `branch-pr` workflow, create a feature branch after initialization and before code edits.
+
+Branch name is derived from the Step 0 Goal, not from the VibesDeGoGo! id. Pick a name in the form `{type}/{slug}` where:
+
+- `{type}` is one of `feat`, `fix`, `refactor`, `docs`, `test`, `chore` (same vocabulary as the Step 9 commit type).
+- `{slug}` is a short kebab-case summary of the change (3-5 words, lowercase, ASCII, hyphen-separated). Drop articles and filler.
+- Examples: `feat/japanese-readme`, `fix/init-portability`, `refactor/state-helpers`.
 
 ```bash
 WORKFLOW=branch-pr
@@ -78,13 +84,13 @@ if [ "${WORKFLOW:-branch-pr}" != "trunk" ]; then
     BASE_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')
     BASE_BRANCH=${BASE_BRANCH:-main}
   fi
-  CUR=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
-  case "$CUR" in
-    vibesdegogo/*) : ;;
-    *) git checkout -b "vibesdegogo/$(vdgg_get_id)" ;;
-  esac
+  # VDGG_BRANCH: agent fills in based on the agreed Step 0 Goal.
+  VDGG_BRANCH="<type>/<kebab-case-slug>"
+  git checkout -b "$VDGG_BRANCH"
 fi
 ```
+
+Nesting is allowed: if the current branch is already a feature branch, a new `{type}/{slug}` branch is still created on top of it. The Step 1 block runs once per session because `vdgg_state_init` refuses a second initialization.
 
 Then output:
 
