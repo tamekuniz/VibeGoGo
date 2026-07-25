@@ -100,3 +100,67 @@ set -e
 assert_exit_code 1 "$STATUS" "unknown phase is rejected by vdgg_state_write"
 
 vdgg_state_clear >/dev/null 2>&1
+
+# --- Formation: every step can name the AI (and model) that runs it ----------
+export VDGG_CONFIG_DIR="$TMPDIR_VDGG/user-config"
+mkdir -p "$VDGG_CONFIG_DIR/formations" "$VDGG_CONFIG_DIR/executors" "$TMPDIR_VDGG/bin"
+EXECUTOR="$TMPDIR_VDGG/bin/test-executor"
+printf '#!/bin/sh\nprintf "ran\\n" > "$VDGG_EXECUTOR_OUTPUT"\n' > "$EXECUTOR"
+chmod +x "$EXECUTOR"
+printf 'COMMAND=%s\n' "$EXECUTOR" > "$VDGG_CONFIG_DIR/executors/qwen.conf"
+
+cat > "$VDGG_CONFIG_DIR/formations/allsteps.conf" <<'CONF'
+0: primary
+0G: qwen
+1: primary
+2: primary
+3: qwen
+4: qwen
+5: primary
+6: qwen
+6R: primary
+7: sonnet5
+8: primary
+9: haiku45
+--
+free-form memo below the separator
+9: ignored
+CONF
+
+set +e
+vdgg_formation_preflight allsteps >/tmp/vdgg-test-formation.out 2>/tmp/vdgg-test-formation.err
+STATUS=$?
+set -e
+assert_exit_code 0 "$STATUS" "formation with every step listed is accepted"
+assert_eq "inline" "$(vdgg_formation_resolve STEP_1_AI allsteps)" "primary resolves to inline"
+assert_eq "qwen" "$(vdgg_formation_resolve STEP_3_AI allsteps)" "a delegated seat resolves to its executor"
+assert_eq "qwen" "$(vdgg_formation_resolve STEP_0_GRILL_AI allsteps)" "0G is the Grill Me seat"
+assert_eq "sonnet5" "$(vdgg_formation_resolve STEP_7_AI allsteps)" "a model shorthand resolves on seat 7"
+assert_eq "haiku45" "$(vdgg_formation_resolve STEP_9_AI allsteps)" "seat 9 accepts a model shorthand"
+
+_vdgg_parse_seat_value "sonnet5" "STEP_7_AI"
+assert_eq "claude" "$_VDGG_SEAT_NAME" "sonnet5 expands to the claude wrapper"
+assert_eq "claude-sonnet-5" "$_VDGG_SEAT_MODEL" "sonnet5 expands to a full model id"
+
+printf '3: unknown-ai\n' > "$VDGG_CONFIG_DIR/formations/badai.conf"
+set +e
+vdgg_formation_preflight badai >/dev/null 2>&1
+STATUS=$?
+set -e
+assert_exit_code 1 "$STATUS" "an unknown AI is rejected"
+
+set +e
+vdgg_state_init --formation allsteps >/tmp/vdgg-test-formation-init.out 2>/tmp/vdgg-test-formation-init.err
+STATUS=$?
+set -e
+assert_exit_code 0 "$STATUS" "state init accepts a formation"
+IDF=$(vdgg_get_id)
+assert_eq "allsteps" "$(grep '^formation=' ".claude/.vdgg-state-${IDF}" | cut -d= -f2-)" "state records the formation"
+vdgg_state_clear >/dev/null 2>&1
+
+set +e
+vdgg_state_init --formation badai >/dev/null 2>&1
+STATUS=$?
+set -e
+assert_exit_code 1 "$STATUS" "state init refuses an invalid formation"
+assert_file_not_exists ".claude/.vdgg-active" "state stays unarmed for an invalid formation"

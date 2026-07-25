@@ -55,7 +55,31 @@ ${VDGG_CONFIG_DIR:-$HOME/.config/vdgg}/
   executors/<ai>.conf
 ```
 
-A Formation must define every key: `STEP_0_AI` through `STEP_9_AI`, plus `STEP_6R_AI` and `STEP_0_GRILL_AI`. `inline` means the current Claude Code agent (the same agent that runs this skill). Any other AI name must have an executor file containing one `COMMAND=/absolute/path/to/executable` line. The parser never sources these files and the command is executed directly, not through a shell string.
+Write one line per step, in order, so the whole lineup is visible at a glance:
+
+```text
+0: primary
+0G: primary
+1: primary
+2: primary
+3: sonnet5
+4: sonnet5
+5: primary
+6: sonnet5
+6R: fable5
+7: fable5
+8: primary
+9: primary
+--
+Everything below the separator is a free-form memo and is never read.
+```
+
+Syntax, one line per seat: `<seat>: <ai> [model] [effort]`.
+
+- Seats: `0`, `0G`, `1`, `2`, `3`, `4`, `5`, `6`, `6R`, `7`, `8`, `9` (case-insensitive; `grill` is still accepted as a synonym of `0G`), plus `*` which assigns `3, 4, 6, 6R, 7` at once — an explicit seat line wins over `*`. Every step can name the AI that runs it. Unlisted seats fall back to `primary`.
+- Values: `primary` — the model this session is already running on, i.e. no delegation (`inline` is accepted as a synonym). The model shorthands `opus5`, `sonnet5`, `fable5`, `haiku45`, which expand to the bundled `claude` wrapper plus the full model id. The builtins `claude` / `codex`, which run the bundled `scripts/vdgg-exec-claude.sh` / `vdgg-exec-codex.sh` wrappers with optional model and effort tokens — effort is recognized by a closed vocabulary (claude: `low|medium|high`, codex: `minimal|low|medium|high|xhigh`), any other token is the model. Or a bare executor name resolved through `executors/<name>.conf` containing one `COMMAND=/absolute/path/to/executable` line; bare names and model shorthands take no extra tokens — bake fixed settings into that command.
+- A lone `--` line ends the configuration. Everything below it is a memo: no comment marker is needed and nothing there is parsed, so it cannot break the file.
+- The parser never sources these files and the command is executed directly, not through a shell string. Tokens must start with an alphanumeric so they can never reach an executor's argv as a flag.
 
 When a Formation is selected, resolve the assigned AI before acting in every Step with `vdgg_formation_resolve <STEP_KEY>`. Use `STEP_6R_AI` for reflection and `STEP_0_GRILL_AI` for Grill Me. Then:
 
@@ -65,7 +89,7 @@ When a Formation is selected, resolve the assigned AI before acting in every Ste
 
 The executor receives `VDGG_EXECUTOR_FORMATION`, `VDGG_EXECUTOR_AI`, `VDGG_EXECUTOR_STEP`, `VDGG_EXECUTOR_INPUT`, and `VDGG_EXECUTOR_OUTPUT`. State transitions, task allowlists, review gates, and commit permissions remain owned by the controlling VDGG session — Claude Code hooks continue to enforce them.
 
-Steps 1, 2, 5, 8, and 9 are inline-only regardless of Formation assignment. The Formation must still define those keys (validation requires all 13 keys); use the literal value `inline` for them.
+Naming an AI on a seat assigns the *work product* of that step, never the mechanics: state transitions, task allowlists, review gates, and commit permissions stay with the controlling VDGG session at every step, and the Claude Code hooks continue to enforce them. So an AI named on Step 1, 2, 5, 8, or 9 drafts or decides the artifact for that step — the branch name, `requirements.md`, the next task and its allowlist, the progress update, the commit message — while this session performs the state write, the gate arming, and the git operation. Seats `0` and `0G` are conversational, so a bundled one-shot wrapper there answers in a single pass instead of holding a dialogue; use a bare executor that can own the conversation when that matters.
 
 Relationship with the legacy path: when a Formation is selected, `STEP3_EXECUTOR_COMMAND`, `STEP4_EXECUTOR_COMMAND`, and `STEP6_EXECUTOR_TIERS` are ignored — the Formation's `STEP_3_AI`/`STEP_4_AI`/`STEP_6_AI` are authoritative. When no Formation is selected, the legacy `_COMMAND` keys and the tier ladder below apply as historically. Do not mix both in the same session.
 
