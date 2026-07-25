@@ -214,12 +214,58 @@ _VDGG_SCRIPT_DIR="$REAL_SCRIPT_DIR"
 printf '1: qwen\n' > "$VDGG_CONFIG_DIR/formations/seat1.conf"
 vdgg_formation_preflight seat1 >/tmp/vdgg-test-formation-seat1.out 2>/tmp/vdgg-test-formation-seat1.err
 SEAT1_RC=$?
-assert_exit_code 1 "$SEAT1_RC" "Codex rejects an inline-only seat assignment"
+assert_exit_code 0 "$SEAT1_RC" "Codex accepts an AI on every seat"
+assert_eq "qwen" "$(vdgg_formation_resolve STEP_1_AI seat1)" "Codex resolves an AI on seat 1"
+
+printf '9: sonnet5\n' > "$VDGG_CONFIG_DIR/formations/seat9.conf"
+vdgg_formation_preflight seat9 >/tmp/vdgg-test-formation-seat9.out 2>/tmp/vdgg-test-formation-seat9.err
+SEAT9_RC=$?
+assert_exit_code 0 "$SEAT9_RC" "Codex accepts a model shorthand on seat 9"
+assert_eq "sonnet5" "$(vdgg_formation_resolve STEP_9_AI seat9)" "Codex resolves a model shorthand on seat 9"
+
+# Every step can be written; the workflow-owned ones take "primary".
+cat > "$VDGG_CONFIG_DIR/formations/allsteps.conf" <<'EOF'
+0: primary
+0G: qwen
+1: primary
+2: primary
+3: qwen
+4: qwen
+5: primary
+6: qwen
+6R: primary
+7: qwen
+8: primary
+9: primary
+EOF
+vdgg_formation_preflight allsteps >/tmp/vdgg-test-formation-allsteps.out 2>/tmp/vdgg-test-formation-allsteps.err
+ALLSTEPS_RC=$?
+assert_exit_code 0 "$ALLSTEPS_RC" "Codex accepts primary on every workflow-owned seat"
+assert_eq "inline" "$(vdgg_formation_resolve STEP_1_AI allsteps)" "Codex resolves primary to inline"
+assert_eq "qwen" "$(vdgg_formation_resolve STEP_3_AI allsteps)" "Codex resolves a delegated seat"
+assert_eq "qwen" "$(vdgg_formation_resolve STEP_0_GRILL_AI allsteps)" "Codex accepts 0G as the Grill Me seat"
+
+# Model shorthands expand to the bundled claude wrapper plus a full model id.
+printf '6: sonnet5\n' > "$VDGG_CONFIG_DIR/formations/alias.conf"
+vdgg_formation_preflight alias >/tmp/vdgg-test-formation-alias.out 2>/tmp/vdgg-test-formation-alias.err
+ALIAS_RC=$?
+assert_exit_code 0 "$ALIAS_RC" "Codex accepts a model shorthand"
+_vdgg_parse_seat_value "sonnet5" "STEP_6_AI"
+assert_eq "claude" "$_VDGG_SEAT_NAME" "Codex expands sonnet5 to the claude wrapper"
+assert_eq "claude-sonnet-5" "$_VDGG_SEAT_MODEL" "Codex expands sonnet5 to a full model id"
+
+# Everything below a lone "--" is a free-form memo.
+printf '3: qwen\n--\nfree text, no comment marker\n9: ignored\n' > "$VDGG_CONFIG_DIR/formations/memo.conf"
+vdgg_formation_preflight memo >/tmp/vdgg-test-formation-memo.out 2>/tmp/vdgg-test-formation-memo.err
+MEMO_RC=$?
+assert_exit_code 0 "$MEMO_RC" "Codex ignores everything below the memo separator"
+assert_eq "inline" "$(vdgg_formation_resolve STEP_9_AI memo)" "Codex does not read seats from the memo"
 
 printf '0: codex\n' > "$VDGG_CONFIG_DIR/formations/seat0.conf"
 vdgg_formation_preflight seat0 >/tmp/vdgg-test-formation-seat0.out 2>/tmp/vdgg-test-formation-seat0.err
 SEAT0_RC=$?
-assert_exit_code 1 "$SEAT0_RC" "Codex rejects a builtin on the interactive seat 0"
+assert_exit_code 0 "$SEAT0_RC" "Codex accepts an AI on the conversational seat 0"
+assert_eq "codex" "$(vdgg_formation_resolve STEP_0_AI seat0)" "Codex resolves an AI on seat 0"
 
 printf '6: qwen low\n' > "$VDGG_CONFIG_DIR/formations/baretok.conf"
 vdgg_formation_preflight baretok >/tmp/vdgg-test-formation-baretok.out 2>/tmp/vdgg-test-formation-baretok.err

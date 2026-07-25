@@ -49,26 +49,31 @@ ${VDGG_CONFIG_DIR:-$HOME/.config/vdgg}/
   executors/<ai>.conf
 ```
 
-The whole file can be one line — delegate every delegable seat to Codex:
+Write one line per step, in order, so the whole lineup is visible at a glance:
 
 ```text
-*: codex
+0: primary
+0G: primary
+1: primary
+2: primary
+3: sonnet5
+4: sonnet5
+5: primary
+6: sonnet5
+6R: fable5
+7: fable5
+8: primary
+9: primary
+--
+Everything below the separator is a free-form memo and is never read.
 ```
 
-Or pick per seat, with an optional model and effort on the builtins:
+Syntax, one line per seat: `<seat>: <ai> [model] [effort]`.
 
-```text
-3: codex
-6: claude sonnet low
-7: codex high
-grill: qwen-grill
-```
-
-Syntax, one line per delegated seat: `<seat>: <ai> [model] [effort]`.
-
-- Seats: `0`, `3`, `4`, `6`, `6R`, `7`, `grill` (case-insensitive), plus `*` which assigns the non-interactive seats `3, 4, 6, 6R, 7` at once; an explicit seat line wins over `*`. Unlisted seats are `inline` (the current Codex agent). Seats 1, 2, 5, 8, 9 are inline-only and cannot be written.
-- Values: `inline`; the builtins `claude` / `codex`, which run the bundled `scripts/vdgg-exec-claude.sh` / `vdgg-exec-codex.sh` wrappers with optional model and effort tokens — effort is recognized by a closed vocabulary (claude: `low|medium|high`, codex: `minimal|low|medium|high|xhigh`), any other token is the model. Or a bare executor name resolved through `executors/<name>.conf` containing one `COMMAND=/absolute/path/to/executable` line; bare names take no tokens — bake fixed model settings into that command.
-- The bundled builtins are non-interactive, so `0:` and `grill:` reject `claude`/`codex` — those seats need `inline` or a bare executor that can own the conversation. A user-defined `executors/claude.conf` or `executors/codex.conf` overrides the builtin of the same name; the name then behaves as a bare executor — it takes no model/effort tokens, and it becomes eligible for `0:`/`grill:` like any other bare executor.
+- Seats: `0`, `0G`, `1`, `2`, `3`, `4`, `5`, `6`, `6R`, `7`, `8`, `9` (case-insensitive; `grill` is still accepted as a synonym of `0G`), plus `*` which assigns `3, 4, 6, 6R, 7` at once — an explicit seat line wins over `*`. Every step can name the AI that runs it. Unlisted seats fall back to `primary`.
+- Values: `primary` — the model this session is already running on, i.e. no delegation (`inline` is accepted as a synonym). The model shorthands `opus5`, `sonnet5`, `fable5`, `haiku45`, which expand to the bundled `claude` wrapper plus the full model id. The builtins `claude` / `codex`, which run the bundled `scripts/vdgg-exec-claude.sh` / `vdgg-exec-codex.sh` wrappers with optional model and effort tokens — effort is recognized by a closed vocabulary (claude: `low|medium|high`, codex: `minimal|low|medium|high|xhigh`), any other token is the model. Or a bare executor name resolved through `executors/<name>.conf` containing one `COMMAND=/absolute/path/to/executable` line; bare names and model shorthands take no extra tokens — bake fixed settings into that command.
+- A lone `--` line ends the configuration. Everything below it is a memo: no comment marker is needed and nothing there is parsed, so it cannot break the file.
+- Naming an AI on a seat assigns the *work product* of that step, never the mechanics. State transitions, task allowlists, review gates, and commit permissions stay with the controlling VDGG session at every step. Seats `0` and `0G` are conversational, so a bundled one-shot wrapper there answers in a single pass instead of holding a dialogue — use a bare executor that can own the conversation when that matters.
 - The parser never sources these files and the command is executed directly, not through a shell string. Tokens must start with an alphanumeric so they can never reach an executor's argv as a flag.
 
 When a Formation is selected, resolve the assigned AI before acting in every Step with `vdgg_formation_resolve <STEP_KEY>`. Use `STEP_6R_AI` for reflection and `STEP_0_GRILL_AI` for Grill Me. Then:

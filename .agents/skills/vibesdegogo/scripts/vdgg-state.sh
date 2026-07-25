@@ -173,12 +173,29 @@ _vdgg_executor_file() {
 _vdgg_seat_to_key() {
   case "$1" in
     0) echo STEP_0_AI ;;
+    1) echo STEP_1_AI ;;
+    2) echo STEP_2_AI ;;
     3) echo STEP_3_AI ;;
     4) echo STEP_4_AI ;;
+    5) echo STEP_5_AI ;;
     6) echo STEP_6_AI ;;
     6R|6r) echo STEP_6R_AI ;;
     7) echo STEP_7_AI ;;
-    [Gg][Rr][Ii][Ll][Ll]) echo STEP_0_GRILL_AI ;;
+    8) echo STEP_8_AI ;;
+    9) echo STEP_9_AI ;;
+    0G|0g|[Gg][Rr][Ii][Ll][Ll]) echo STEP_0_GRILL_AI ;;
+    *) return 1 ;;
+  esac
+}
+
+# Model shorthands. Each expands to the bundled "claude" wrapper plus a
+# full model id, so the rest of the pipeline needs no special case.
+_vdgg_model_alias() {
+  case "$1" in
+    opus5) echo claude-opus-5 ;;
+    sonnet5) echo claude-sonnet-5 ;;
+    fable5) echo claude-fable-5 ;;
+    haiku45) echo claude-haiku-4-5 ;;
     *) return 1 ;;
   esac
 }
@@ -227,11 +244,20 @@ _vdgg_parse_seat_value() {
     return 1
   }
   case "$_VDGG_SEAT_NAME" in
-    inline)
+    primary|inline)
       [ -z "$tok1" ] || {
-        echo "vdgg-formation: inline takes no extra tokens ($label): $value" >&2
+        echo "vdgg-formation: $_VDGG_SEAT_NAME takes no extra tokens ($label): $value" >&2
         return 1
       }
+      _VDGG_SEAT_NAME="inline"
+      ;;
+    opus5|sonnet5|fable5|haiku45)
+      [ -z "$tok1" ] || {
+        echo "vdgg-formation: model shorthand '$_VDGG_SEAT_NAME' takes no extra tokens ($label): $value" >&2
+        return 1
+      }
+      _VDGG_SEAT_MODEL=$(_vdgg_model_alias "$_VDGG_SEAT_NAME")
+      _VDGG_SEAT_NAME="claude"
       ;;
     claude|codex)
       [ -z "$extra" ] || {
@@ -267,21 +293,13 @@ _vdgg_parse_seat_value() {
   esac
 }
 
+# Every seat accepts every value: any step can name the model it should run on.
+# Seat 0 and Grill Me are conversational, so a bundled one-shot wrapper there
+# answers in a single pass instead of holding a dialogue — that is a runtime
+# consequence of the choice, not a reason to reject the configuration.
 _vdgg_check_seat_value() {
   local key="$1" value="$2"
   _vdgg_parse_seat_value "$value" "$key" || return 1
-  case "$_VDGG_SEAT_NAME" in
-    claude|codex)
-      # The ban applies to the bundled non-interactive wrappers only; a
-      # user-defined executors/<name>.conf overrides the builtin (same
-      # decision _vdgg_seat_command makes) and may own the interactive seat.
-      if { [ "$key" = "STEP_0_AI" ] || [ "$key" = "STEP_0_GRILL_AI" ]; } \
-          && [ ! -f "$(_vdgg_executor_file "$_VDGG_SEAT_NAME")" ]; then
-        echo "vdgg-formation: builtin '$_VDGG_SEAT_NAME' is non-interactive and cannot own the interactive seat ($key); use a bare executor name instead" >&2
-        return 1
-      fi
-      ;;
-  esac
 }
 
 _vdgg_validate_formation_file() {
@@ -297,6 +315,8 @@ _vdgg_validate_formation_file() {
   }
 
   while IFS= read -r line || [ -n "$line" ]; do
+    # Everything below a lone "--" is a free-form memo: stop reading.
+    [ "$(_vdgg_trim "$line")" = "--" ] && break
     case "$line" in
       ''|'#'*) continue ;;
       STEP_*=*)
@@ -314,14 +334,8 @@ _vdgg_validate_formation_file() {
     if [ "$seat" = "*" ]; then
       key="*"
     else
-      case "$seat" in
-        1|2|5|8|9)
-          echo "vdgg-formation: seat $seat is inline-only and cannot be assigned in $file" >&2
-          return 1
-          ;;
-      esac
       key=$(_vdgg_seat_to_key "$seat") || {
-        echo "vdgg-formation: unknown seat in $file: $seat (valid: 0, 3, 4, 6, 6R, 7, grill, *)" >&2
+        echo "vdgg-formation: unknown seat in $file: $seat (valid: 0, 0G, 1, 2, 3, 4, 5, 6, 6R, 7, 8, 9, *)" >&2
         return 1
       }
     fi
@@ -344,6 +358,7 @@ _vdgg_formation_value() {
   local formation="$1" step_key="$2" file line seat value key explicit="" wildcard=""
   file=$(_vdgg_formation_file "$formation")
   while IFS= read -r line || [ -n "$line" ]; do
+    [ "$(_vdgg_trim "$line")" = "--" ] && break
     case "$line" in
       ''|'#'*) continue ;;
     esac
@@ -356,13 +371,18 @@ _vdgg_formation_value() {
     key=$(_vdgg_seat_to_key "$seat" 2>/dev/null) || continue
     [ "$key" = "$step_key" ] && explicit="$value"
   done < "$file"
+  local result="inline"
   if [ -n "$explicit" ]; then
-    printf '%s\n' "$explicit"
+    result="$explicit"
   elif [ -n "$wildcard" ] && _vdgg_key_in_wildcard "$step_key"; then
-    printf '%s\n' "$wildcard"
-  else
-    printf '%s\n' "inline"
+    result="$wildcard"
   fi
+  # "primary" is the file-facing word for "the session's own model"; every
+  # caller downstream already understands "inline", so normalize here.
+  case "$result" in
+    primary) result="inline" ;;
+  esac
+  printf '%s\n' "$result"
 }
 
 # Resolve a validated seat value ("<name> [model] [effort]") to an executable.
