@@ -148,6 +148,30 @@ REARM_WIDE_COUNT=$(wc -l < ".claude/.vdgg-task-allowlist-${IDRA}-0" | tr -d ' ')
 assert_eq "2" "$REARM_WIDE_COUNT" "re-arm via 8->5 records the widened allowlist"
 vdgg_state_clear >/dev/null 2>&1
 
+# Unsafe path guard: a rejected allowlist entry must be refused BEFORE the setup
+# truncates the allowlist and deletes the baseline. Otherwise the session keeps
+# an armed task title with no allowlist and cannot advance (5 -> 8 is illegal).
+vdgg_state_init >/tmp/vdgg-test-task-unsafe-init.out 2>/tmp/vdgg-test-task-unsafe-init.err
+IDUP=$(vdgg_get_id)
+vdgg_state_advance 2 requirements >/dev/null 2>&1
+vdgg_state_advance 3 investigating >/dev/null 2>&1
+vdgg_state_advance 4 planning >/dev/null 2>&1
+vdgg_state_advance 5 task-selected >/dev/null 2>&1
+vdgg_task_begin "TU: armed" src/app.sh >/dev/null 2>&1
+set +e
+# The bad path must be the ONLY argument: with a good path first, the pre-fix
+# loop wrote that one before rejecting, so the allowlist matched by accident.
+vdgg_task_begin "TU: outside the repo" /etc/hosts \
+    >/tmp/vdgg-test-task-unsafe.out 2>/tmp/vdgg-test-task-unsafe.err
+UNSAFE_RC=$?
+set -e
+assert_exit_code 1 "$UNSAFE_RC" "task_begin rejects an absolute allowlist path"
+UNSAFE_ALLOWLIST_CONTENT=$(cat ".claude/.vdgg-task-allowlist-${IDUP}-0")
+assert_eq "src/app.sh" "$UNSAFE_ALLOWLIST_CONTENT" "rejected path leaves the allowlist intact"
+UNSAFE_STATE_ALLOWLIST=$(grep '^task_allowlist_file=' ".claude/.vdgg-state-${IDUP}" | cut -d= -f2-)
+assert_ne "" "$UNSAFE_STATE_ALLOWLIST" "rejected path leaves the session armed"
+vdgg_state_clear >/dev/null 2>&1
+
 # zsh regression: `local path` would empty $PATH when sourced into zsh.
 if command -v zsh >/dev/null 2>&1; then
     vdgg_state_clear >/dev/null 2>&1

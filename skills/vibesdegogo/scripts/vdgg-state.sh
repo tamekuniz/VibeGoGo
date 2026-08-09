@@ -932,16 +932,23 @@ vdgg_task_begin() {
     baseline_status=$(_vdgg_task_baseline_status_for_id "$id" "$loop")
     gate_file=$(_vdgg_task_gate_file_for_id "$id" "$loop")
 
+    # Validate every path BEFORE any side effect, for the same reason as the
+    # step check above: the setup below truncates the allowlist and deletes the
+    # baseline, so rejecting the third of four entries would leave the session
+    # armed with nothing and stuck at Step 5 (5 -> 8 is not a legal transition).
+    for entry in "$@"; do
+        if ! _vdgg_path_is_safe_relative "$entry"; then
+            echo "vdgg_task_begin: unsafe allowlist path: $entry" >&2
+            return 1
+        fi
+    done
+
     rm -rf "$baseline_dir"
     rm -f "$gate_file"
     mkdir -p "$baseline_dir"
     : > "$allowlist_file"
 
     for entry in "$@"; do
-        if ! _vdgg_path_is_safe_relative "$entry"; then
-            echo "vdgg_task_begin: unsafe allowlist path: $entry" >&2
-            return 1
-        fi
         normalized=$(_vdgg_normalize_path "$entry")
         printf '%s\n' "$normalized" >> "$allowlist_file"
         if [ -e "${VDGG_CWD}/$normalized" ]; then
