@@ -395,6 +395,28 @@ REARM_WIDE_COUNT=$(wc -l < ".codex/.vdgg-task-allowlist-${IDRA}-0" | tr -d ' ')
 assert_eq "2" "$REARM_WIDE_COUNT" "Codex re-arm via 8->5 records the widened allowlist"
 vdgg_state_clear >/dev/null 2>&1
 
+# Unsafe path guard: a rejected allowlist entry must be refused BEFORE the setup
+# truncates the allowlist and deletes the baseline. Otherwise the session keeps
+# an armed task title with no allowlist and cannot advance (5 -> 8 is illegal).
+vdgg_state_init >/tmp/vdgg-test-codex-unsafe-init.out 2>/tmp/vdgg-test-codex-unsafe-init.err
+IDUP=$(vdgg_get_id)
+vdgg_state_advance 2 requirements >/dev/null 2>&1
+vdgg_state_advance 3 investigating >/dev/null 2>&1
+vdgg_state_advance 4 planning >/dev/null 2>&1
+vdgg_state_advance 5 task-selected >/dev/null 2>&1
+vdgg_task_begin "TU: armed" functions/index.js >/dev/null 2>&1
+# The bad path must be the ONLY argument: with a good path first, the pre-fix
+# loop wrote that one before rejecting, so the allowlist matched by accident.
+vdgg_task_begin "TU: outside the repo" /etc/hosts \
+    >/tmp/vdgg-test-codex-unsafe.out 2>/tmp/vdgg-test-codex-unsafe.err
+UNSAFE_RC=$?
+assert_exit_code 1 "$UNSAFE_RC" "Codex task_begin rejects an absolute allowlist path"
+UNSAFE_ALLOWLIST_CONTENT=$(cat ".codex/.vdgg-task-allowlist-${IDUP}-0")
+assert_eq "functions/index.js" "$UNSAFE_ALLOWLIST_CONTENT" "Codex rejected path leaves the allowlist intact"
+UNSAFE_STATE_ALLOWLIST=$(grep '^task_allowlist_file=' ".codex/.vdgg-state-${IDUP}" | cut -d= -f2-)
+assert_ne "" "$UNSAFE_STATE_ALLOWLIST" "Codex rejected path leaves the session armed"
+vdgg_state_clear >/dev/null 2>&1
+
 # zsh regression: `local path` would empty $PATH when sourced into zsh.
 if command -v zsh >/dev/null 2>&1; then
     zsh -c "cd '$TMPDIR_VDGG' && export VDGG_CWD='$TMPDIR_VDGG' VDGG_CONFIG_DIR='$VDGG_CONFIG_DIR' && source '$ROOT/.agents/skills/vibesdegogo/scripts/vdgg-state.sh' && vdgg_state_init --formation balanced && vdgg_state_advance 2 requirements && vdgg_state_advance 3 investigating && vdgg_state_advance 4 planning && vdgg_state_advance 5 task-selected && vdgg_task_begin 'TZ: zsh probe' functions/index.js" >/tmp/vdgg-test-codex-zsh.out 2>/tmp/vdgg-test-codex-zsh.err
