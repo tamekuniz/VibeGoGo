@@ -1,3 +1,10 @@
+> **⚠️ This repository is superseded and no longer maintained.**
+> Its contents are frozen at 2026-06-07 and are missing every feature added since.
+> The maintained editions are
+> [VibesDeGoGo-for-Claude-Code](https://github.com/tmknzz/VibesDeGoGo-for-Claude-Code)
+> and [VibesDeGoGo-for-Codex](https://github.com/tmknzz/VibesDeGoGo-for-Codex).
+> Do not read this repository as the current specification.
+
 **English** | [日本語](README.ja.md)
 
 # VibesDeGoGo!

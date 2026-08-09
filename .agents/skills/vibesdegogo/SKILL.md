@@ -4,6 +4,12 @@ description: "Use VibesDeGoGo! for Codex when the user asks Codex to carry codin
 version: 0.2.0
 ---
 
+> **⚠️ SUPERSEDED COPY — frozen at 2026-06-07. Do not read this file as the current specification.**
+> The maintained Codex edition lives in
+> [VibesDeGoGo-for-Codex](https://github.com/tmknzz/VibesDeGoGo-for-Codex).
+> Features added after the freeze — Formation per-step model assignment, executor
+> delegation, the task gate, and external review — are absent here.
+
 # VibesDeGoGo! for Codex
 
 VibesDeGoGo! for Codex is a serial, state-file-driven workflow for autonomous coding in Codex. It follows the VibesDeGoGo! for Claude Code step model first; do not simplify the workflow unless the user explicitly asks for a lighter mode.

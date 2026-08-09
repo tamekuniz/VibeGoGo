@@ -4,6 +4,14 @@ description: "A state-and-hook workflow for Claude Code that keeps coding agents
 version: 0.2.0
 ---
 
+> **⚠️ SUPERSEDED COPY — frozen at 2026-06-07. Do not read this file as the current specification.**
+> The maintained version lives in
+> [VibesDeGoGo-for-Claude-Code](https://github.com/tmknzz/VibesDeGoGo-for-Claude-Code)
+> (Codex edition: [VibesDeGoGo-for-Codex](https://github.com/tmknzz/VibesDeGoGo-for-Codex)),
+> and the installed copy under `~/.claude/skills/vibesdegogo/` is what actually runs.
+> Features added after the freeze — Formation per-step model assignment, executor
+> delegation, the task gate, and external review — are absent here.
+
 # VibesDeGoGo!
 
 VibesDeGoGo! is a serial, state-file-driven workflow for autonomous coding with Claude Code. It uses a state file plus Claude Code hooks to mechanically enforce the order of work. The agent does the work directly by default, and delegates to subagents only when parallel work is clearly useful.

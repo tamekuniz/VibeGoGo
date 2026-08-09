@@ -1,3 +1,10 @@
+> **⚠️ このリポジトリは役目を終えており、更新されていません。**
+> 内容は 2026-06-07 時点で凍結されていて、それ以降に追加された機能は入っていません。
+> 現行版は
+> [VibesDeGoGo-for-Claude-Code](https://github.com/tmknzz/VibesDeGoGo-for-Claude-Code)
+> と [VibesDeGoGo-for-Codex](https://github.com/tmknzz/VibesDeGoGo-for-Codex) です。
+> このリポジトリを現行仕様として読まないでください。
+
 [English](README.md) | **日本語**
 
 # VibesDeGoGo!
