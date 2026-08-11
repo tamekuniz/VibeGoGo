@@ -335,3 +335,48 @@ assert_exit_code 2 "$STATUS" "entry gate: jq missing + required + unarmed fails 
 
 rm -rf "$ENTRY_DIR"
 rm -rf "$FAKEBIN" "$NO_VDGG_DIR"
+
+# --- [Error Acknowledged] gate: mtime-anchored acknowledgement ----------------
+# The flag's mtime is the anchor; timestamps far apart (2020 vs 2030) keep the
+# assertions immune to local-timezone offsets in _vdgg_mtime.
+ACK_TRANSCRIPT="$TMPDIR_VDGG/transcript.jsonl"
+write_state implementing 6
+write_ack_flag() {
+    printf 'reason=exit 1\n' > "$TMPDIR_VDGG/.claude/.vdgg-error-pending"
+    touch -t 202601011200 "$TMPDIR_VDGG/.claude/.vdgg-error-pending"
+}
+
+# 1) Acknowledgement AFTER the flag was recorded -> allowed, flag consumed.
+write_ack_flag
+cat > "$ACK_TRANSCRIPT" <<'JSONL'
+{"type":"assistant","timestamp":"2020-01-01T00:00:00.000Z","message":{"content":[{"type":"text","text":"[Error Acknowledged] stale ack from an earlier error"}]}}
+{"type":"assistant","timestamp":"2030-01-01T00:00:00.500Z","message":{"content":[{"type":"text","text":"[Error Acknowledged] retrying with fixed flag"}]}}
+JSONL
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","transcript_path":"'"$ACK_TRANSCRIPT"'","tool_input":{"command":"echo ok"}}')
+assert_exit_code 0 "$STATUS" "ack gate: acknowledgement after flag mtime unblocks"
+assert_file_not_exists "$TMPDIR_VDGG/.claude/.vdgg-error-pending" "ack gate: flag is consumed on acknowledgement"
+
+# 2) Only an OLD acknowledgement (before the flag) -> still blocked.
+write_ack_flag
+cat > "$ACK_TRANSCRIPT" <<'JSONL'
+{"type":"assistant","timestamp":"2020-01-01T00:00:00Z","message":{"content":[{"type":"text","text":"[Error Acknowledged] this belongs to a previous error"}]}}
+JSONL
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","transcript_path":"'"$ACK_TRANSCRIPT"'","tool_input":{"command":"echo ok"}}')
+assert_exit_code 2 "$STATUS" "ack gate: an acknowledgement older than the flag stays blocked"
+
+# 3) No parseable timestamps at all -> bounded tail fallback still satisfiable.
+write_ack_flag
+cat > "$ACK_TRANSCRIPT" <<'JSONL'
+{"type":"assistant","message":{"content":[{"type":"text","text":"[Error Acknowledged] transcript without timestamps"}]}}
+JSONL
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","transcript_path":"'"$ACK_TRANSCRIPT"'","tool_input":{"command":"echo ok"}}')
+assert_exit_code 0 "$STATUS" "ack gate: timestamp-free transcript falls back to tail window"
+
+# 4) No acknowledgement anywhere -> blocked.
+write_ack_flag
+cat > "$ACK_TRANSCRIPT" <<'JSONL'
+{"type":"assistant","timestamp":"2030-01-01T00:00:00Z","message":{"content":[{"type":"text","text":"working on it"}]}}
+JSONL
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","transcript_path":"'"$ACK_TRANSCRIPT"'","tool_input":{"command":"echo ok"}}')
+assert_exit_code 2 "$STATUS" "ack gate: missing acknowledgement stays blocked"
+rm -f "$TMPDIR_VDGG/.claude/.vdgg-error-pending" "$ACK_TRANSCRIPT"

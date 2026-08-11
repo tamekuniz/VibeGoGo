@@ -219,10 +219,36 @@ ERROR_FLAG="$CWD/.claude/.vdgg-error-pending"
 if [ -f "$ERROR_FLAG" ]; then
     TRANSCRIPT_PATH_E=$(echo "$INPUT" | jq -r '.transcript_path // empty')
     if [ -n "$TRANSCRIPT_PATH_E" ] && [ -f "$TRANSCRIPT_PATH_E" ]; then
-        LAST_USER_LINE_E=$(jq -r 'select(.type=="user" and ((.message.content | type) == "string" or ((.message.content | type) == "array" and (.message.content[0].type // "") != "tool_result"))) | input_line_number' "$TRANSCRIPT_PATH_E" 2>/dev/null | tail -1)
-        LAST_USER_LINE_E="${LAST_USER_LINE_E:-0}"
-        CURRENT_TURN_TEXT_E=$(awk -v start="$LAST_USER_LINE_E" 'NR > start' "$TRANSCRIPT_PATH_E" | jq -r 'select(.type=="assistant") | .message.content[]? | select(.type=="text") | .text // empty' 2>/dev/null || true)
-        if echo "$CURRENT_TURN_TEXT_E" | grep -qF "[Error Acknowledged]"; then
+        # Accept an acknowledgement emitted at any point after the failure was
+        # recorded, anchored on the flag file's mtime.
+        #
+        # Anchoring on "after the last user message" instead made this gate
+        # unsatisfiable in practice. The current assistant message is not yet in
+        # the transcript at PreToolUse time (see the Guard 2 note below), so the
+        # acknowledgement can never ride in the same message as the retry; and
+        # once the turn ends, ANY later user entry pushes the acknowledgement out
+        # of the window -- including the Stop hook's own feedback, which is
+        # recorded as a user entry. No ordering could satisfy it, so a single
+        # failed Bash command blocked every non-read tool for the rest of the
+        # session.
+        FLAG_MTIME_E=$(_vdgg_mtime "$ERROR_FLAG")
+        # Fractional seconds are stripped because jq's fromdateiso8601 accepts
+        # only whole-second ISO-8601; a parse failure would exclude every entry
+        # and recreate the trap.
+        TS_EXPR_E='((.timestamp // "") | sub("\\.[0-9]+";"") | fromdateiso8601? // 0)'
+        ACK_TEXT_E=$(jq -r --arg t "$FLAG_MTIME_E" "
+            select(.type==\"assistant\")
+            | select($TS_EXPR_E >= (\$t | tonumber))
+            | .message.content[]? | select(.type==\"text\") | .text // empty
+        " "$TRANSCRIPT_PATH_E" 2>/dev/null || true)
+        # If nothing in the transcript carries a parseable timestamp the mtime
+        # anchor cannot work at all; fall back to a bounded tail window so the
+        # gate degrades into something satisfiable rather than into a trap.
+        HAS_TS_E=$(jq -r "select(.type==\"assistant\") | $TS_EXPR_E | select(. > 0)" "$TRANSCRIPT_PATH_E" 2>/dev/null | head -1)
+        if [ -z "$HAS_TS_E" ]; then
+            ACK_TEXT_E=$(tail -n 40 "$TRANSCRIPT_PATH_E" | jq -r 'select(.type=="assistant") | .message.content[]? | select(.type=="text") | .text // empty' 2>/dev/null || true)
+        fi
+        if echo "$ACK_TEXT_E" | grep -qF "[Error Acknowledged]"; then
             rm -f "$ERROR_FLAG"
         else
             ERROR_REASON=$(grep "^reason=" "$ERROR_FLAG" | cut -d= -f2- || echo "unknown")

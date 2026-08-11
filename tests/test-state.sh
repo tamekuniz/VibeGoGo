@@ -156,6 +156,18 @@ set -e
 assert_exit_code 0 "$STATUS" "state init accepts a formation"
 IDF=$(vdgg_get_id)
 assert_eq "allsteps" "$(grep '^formation=' ".claude/.vdgg-state-${IDF}" | cut -d= -f2-)" "state records the formation"
+
+# Regression: formation must survive state rewrites (it was dropped on advance).
+vdgg_state_advance 2 requirements >/dev/null 2>&1
+assert_eq "allsteps" "$(grep '^formation=' ".claude/.vdgg-state-${IDF}" | cut -d= -f2-)" "formation survives a state advance"
+
+# A pre-fix state file has no formation line; the env var recovers the session.
+grep -v '^formation=' ".claude/.vdgg-state-${IDF}" > ".claude/.vdgg-state-${IDF}.tmp"
+mv ".claude/.vdgg-state-${IDF}.tmp" ".claude/.vdgg-state-${IDF}"
+export VDGG_FORMATION=allsteps
+vdgg_state_advance 3 investigating >/dev/null 2>&1
+unset VDGG_FORMATION
+assert_eq "allsteps" "$(grep '^formation=' ".claude/.vdgg-state-${IDF}" | cut -d= -f2-)" "missing formation line falls back to VDGG_FORMATION"
 vdgg_state_clear >/dev/null 2>&1
 
 set +e

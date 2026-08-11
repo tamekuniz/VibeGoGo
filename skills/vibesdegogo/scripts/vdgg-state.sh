@@ -729,7 +729,7 @@ vdgg_state_write() {
         fi
     fi
 
-    local id
+    local id new_formation=""
     id=$(_vdgg_get_active_id)
 
     # Preserve current_task and task gate fields when callers omit them.
@@ -748,7 +748,11 @@ vdgg_state_write() {
         elif [ -z "$new_task_base_ref" ]; then
             new_task_base_ref=$(grep "^task_base_ref=" "$state_file" | cut -d= -f2- || true)
         fi
+        new_formation=$(grep "^formation=" "$state_file" | cut -d= -f2- || true)
     fi
+    # A state file written before formation was preserved has no formation line;
+    # fall back to the environment so an in-flight session can still be recovered.
+    [ -n "$new_formation" ] || new_formation="${VDGG_FORMATION:-}"
 
     cat > "$state_file" << EOF
 step=${new_step}
@@ -757,6 +761,7 @@ loop_count=${new_loop_count}
 current_task=${new_current_task}
 task_allowlist_file=${new_task_allowlist_file}
 task_base_ref=${new_task_base_ref}
+formation=${new_formation}
 vdgg_id=${id}
 last_updated=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF
