@@ -1,0 +1,60 @@
+# servers.conf.example — copy this to ~/.config/vdgg/servers.conf and edit.
+#
+#   mkdir -p ~/.config/vdgg
+#   cp .agents/skills/vibesdegogo/references/servers.conf.example \
+#      ~/.config/vdgg/servers.conf
+#
+# Then edit the `model=` and `port=` lines and run:
+#
+#   vdgg-llm-start --check
+#
+# The launcher expands a leading $HOME / ${HOME} / ~/ in each value, so the
+# lines below work unchanged on any machine. Any other $VAR or ${VAR:-...} is
+# left literal and will fail --check (values are declarative, not shell code).
+#
+# Schema reference: references/servers-conf.md (source of truth for keys,
+# defaults, required vs optional, and exit codes).
+
+[qwen]
+# A coding model. Point `model=` at the .gguf you downloaded; the path here is
+# just where LM Studio happens to put its Hugging Face mirror on macOS.
+model=$HOME/.lmstudio/models/lmstudio-community/Qwen3.6-27B-GGUF/Qwen3.6-27B-Q4_K_M.gguf
+
+# Bind to loopback by default. LAN exposure needs to be an explicit decision:
+# see references/servers-conf.md#security before changing this to 0.0.0.0.
+host=127.0.0.1
+port=8081
+
+# The alias clients see when they call /v1/models.
+alias=qwen-coder
+
+# 65 K tokens — plenty for a coding session; drop this if VRAM is tight.
+ctx_size=65536
+
+# `chatml` is required for the Codex CLI to talk to llama.cpp — Codex sends
+# multiple system/developer messages that only the chatml template accepts in
+# any order. Leave it as chatml unless you know your client wants something
+# else.
+chat_template=chatml
+
+# The launcher refuses to start unless this file exists and is mode 600.
+# Never inline the key here — file permissions do the security work.
+api_key_file=$HOME/.config/vdgg/llama-api-key
+
+# Everything below is passed straight through to llama-server. Tokens are
+# split on whitespace, so write `--parallel 1`, not `--parallel=1`.
+#   --parallel 1           one request at a time (safer memory footprint)
+#   --no-ui --no-slots     drop the web UI / slot inspection
+#   --log-timestamps       readable server logs
+extra_flags=--parallel 1 --no-ui --no-slots --log-timestamps
+
+[gemma]
+# A review model. Same shape as [qwen], different port and no chat_template
+# (default is fine for review-only workloads).
+model=$HOME/.lmstudio/models/lmstudio-community/gemma-4-12B-it-GGUF/gemma-4-12B-it-Q4_K_M.gguf
+host=127.0.0.1
+port=8082
+alias=gemma-review
+ctx_size=32768
+api_key_file=$HOME/.config/vdgg/llama-api-key
+extra_flags=--parallel 1 --no-ui --no-slots --log-timestamps

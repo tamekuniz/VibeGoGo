@@ -1,0 +1,27 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure jq
+        run: |
+          if ! command -v jq >/dev/null 2>&1; then
+            if command -v brew >/dev/null 2>&1; then brew install jq; else sudo apt-get update && sudo apt-get install -y jq; fi
+          fi
+      - name: Syntax check
+        run: |
+          for f in skills/vibesdegogo/scripts/*.sh .agents/skills/vibesdegogo/scripts/*.sh tests/*.sh tests/lib/*.sh; do
+            bash -n "$f"
+          done
+      - name: Run tests
+        run: bash tests/run-all.sh

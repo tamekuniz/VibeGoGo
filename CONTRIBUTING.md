@@ -19,13 +19,15 @@ brew install jq
 
 ## Repository Layout
 
-- `skills/vibesdegogo/`: Claude Code edition.
-- `.agents/skills/vibesdegogo/`: Codex edition.
-- `skills/vibesdegogo/scripts/`: Claude hook and state helpers.
-- `.agents/skills/vibesdegogo/scripts/`: Codex hook and state helpers.
-- `skills/vibesdegogo/references/edition_parity.md`: what must stay aligned
-  between the Claude and Codex editions.
-- `tests/`: zero-dependency smoke tests.
+- `skills/vibesdegogo/`: Claude Code skill.
+- `skills/vibesdegogo/scripts/`: Claude Code hook and state helpers.
+- `skills/vibesdegogo/references/`: workflow references.
+- `hooks/hooks.json`, `.claude-plugin/`: Claude Code plugin packaging.
+- `.agents/skills/vibesdegogo/`: Codex skill, with its own scripts and references.
+  Most of the tree is edition-specific, but six files are shared verbatim — see
+  "Files Shared Between Editions" below.
+- `.codex/hooks.json`: Codex project-local hook registration.
+- `tests/`: zero-dependency smoke tests for both editions.
 
 ## Running Tests
 
@@ -42,6 +44,8 @@ bash tests/test-state.sh
 bash tests/test-hook-pretool.sh
 bash tests/test-hook-posttool.sh
 bash tests/test-hook-stop.sh
+bash tests/test-codex-state.sh
+bash tests/test-codex-hook-pretool.sh
 ```
 
 Run syntax checks when editing scripts:
@@ -59,8 +63,37 @@ When changing names or comments:
 
 - inspect the diff by file;
 - keep behavior changes separate from comment-only changes;
-- update both editions when the shared workflow contract changes;
-- check `skills/vibesdegogo/references/edition_parity.md` before merging.
+- keep each edition's hook JSON contract aligned with its setup docs:
+  `skills/vibesdegogo/references/setup.md` for Claude Code and
+  `.agents/skills/vibesdegogo/references/codex-setup.md` for Codex.
+
+## Files Shared Between Editions
+
+Six files exist under both `skills/vibesdegogo/` and
+`.agents/skills/vibesdegogo/` and must stay byte-identical:
+
+- `scripts/vdgg-llm-start.sh`
+- `scripts/vdgg-exec-claude.sh`
+- `scripts/vdgg-exec-codex.sh`
+- `references/servers-conf.md`
+- `references/servers.conf.example`
+- `references/local-inference-setup.md`
+
+If you change one copy, make the other copy identical in the same commit. This
+applies to every change, including documentation and comment-only edits — it is
+not limited to hook or state scripts.
+
+No test checks this synchronization, so verify it yourself:
+
+```bash
+for f in scripts/vdgg-llm-start.sh scripts/vdgg-exec-claude.sh \
+         scripts/vdgg-exec-codex.sh references/servers-conf.md \
+         references/servers.conf.example references/local-inference-setup.md; do
+  cmp "skills/vibesdegogo/$f" ".agents/skills/vibesdegogo/$f" || echo "OUT OF SYNC: $f"
+done
+```
+
+Every other file in the two trees is edition-specific and is expected to differ.
 
 ## Commit Style
 
@@ -78,8 +111,8 @@ Before opening a PR:
 
 - run `bash tests/run-all.sh`;
 - run syntax checks for changed script sets;
-- note whether the change affects Claude, Codex, or both;
-- update edition parity docs if the shared workflow contract changed.
+- note whether the change affects hooks, state helpers, or workflow docs, and
+  whether it applies to the Claude Code edition, the Codex edition, or both.
 
 ## Versioning
 

@@ -2,6 +2,17 @@
 
 This file explains how to install VibesDeGoGo! in a Claude Code environment.
 
+## 0. Plugin Install (Recommended)
+
+The repository is packaged as a Claude Code plugin: installing it registers the skill AND activates the hooks automatically — no settings.json editing.
+
+```text
+/plugin marketplace add tmknzz/VibesDeGoGo
+/plugin install vibesdegogo@vibesdegogo
+```
+
+`jq` is still required (see Dependencies). The manual install below remains supported for environments without plugin support and for developing VibesDeGoGo! itself.
+
 ## 1. Dependencies
 
 Required:
@@ -15,7 +26,7 @@ Install `jq` on macOS:
 brew install jq
 ```
 
-The hooks fail closed when `jq` is missing, except for a narrow `brew install jq` recovery path.
+When `jq` is missing, the hooks stay out of the way in repositories without an active VibesDeGoGo! session, so global registration never blocks unrelated work. With an active session they fail closed, except for a narrow `jq` install recovery path (`brew install jq`, `apt-get install jq`, etc.).
 
 ## 2. Install The Skill
 

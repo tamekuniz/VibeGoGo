@@ -18,12 +18,15 @@ brew install jq
 
 ## リポジトリ構成
 
-- `skills/vibesdegogo/`: Claude Code エディション
-- `.agents/skills/vibesdegogo/`: Codex エディション
-- `skills/vibesdegogo/scripts/`: Claude 用の hook と state ヘルパー
-- `.agents/skills/vibesdegogo/scripts/`: Codex 用の hook と state ヘルパー
-- `skills/vibesdegogo/references/edition_parity.md`: Claude / Codex 両エディションで揃えるべき項目
-- `tests/`: 依存ゼロの smoke テスト
+- `skills/vibesdegogo/`: Claude Code skill
+- `skills/vibesdegogo/scripts/`: Claude Code 用の hook と state ヘルパー
+- `skills/vibesdegogo/references/`: ワークフロー参照資料
+- `hooks/hooks.json`, `.claude-plugin/`: Claude Code プラグインとしての梱包
+- `.agents/skills/vibesdegogo/`: 独自の scripts と references を持つ Codex skill。
+  大半はエディション固有だが、6 ファイルだけは両ツリーで共通 ──
+  後述の「両エディションで共通のファイル」を参照
+- `.codex/hooks.json`: Codex のプロジェクトローカル hook 登録
+- `tests/`: 両エディション用の依存ゼロの smoke テスト
 
 ## テストの実行
 
@@ -40,6 +43,8 @@ bash tests/test-state.sh
 bash tests/test-hook-pretool.sh
 bash tests/test-hook-posttool.sh
 bash tests/test-hook-stop.sh
+bash tests/test-codex-state.sh
+bash tests/test-codex-hook-pretool.sh
 ```
 
 スクリプト編集時の構文チェック:
@@ -55,8 +60,37 @@ hook / state スクリプト内のコメントに対して、広域 `sed -i` で
 
 - diff をファイル単位で確認する
 - 振る舞いの変更とコメントだけの変更は別コミットに分ける
-- 共有ワークフロー契約が変わる時は両エディションを揃えて更新する
-- merge 前に `skills/vibesdegogo/references/edition_parity.md` を確認する
+- 各エディションの hook JSON 契約と、それぞれの setup ドキュメント
+  （Claude Code は `skills/vibesdegogo/references/setup.md`、Codex は
+  `.agents/skills/vibesdegogo/references/codex-setup.md`）の整合性を保つ
+
+## 両エディションで共通のファイル
+
+次の 6 ファイルは `skills/vibesdegogo/` と `.agents/skills/vibesdegogo/` の
+両方に存在し、byte 一致を保つ必要があります。
+
+- `scripts/vdgg-llm-start.sh`
+- `scripts/vdgg-exec-claude.sh`
+- `scripts/vdgg-exec-codex.sh`
+- `references/servers-conf.md`
+- `references/servers.conf.example`
+- `references/local-inference-setup.md`
+
+片方を変更したら、同じコミットでもう片方も同じ内容にしてください。これは
+hook / state スクリプトに限らず、ドキュメントやコメントだけの変更を含む
+すべての変更に適用されます。
+
+この同期を検査するテストはないので、自分で確認してください:
+
+```bash
+for f in scripts/vdgg-llm-start.sh scripts/vdgg-exec-claude.sh \
+         scripts/vdgg-exec-codex.sh references/servers-conf.md \
+         references/servers.conf.example references/local-inference-setup.md; do
+  cmp "skills/vibesdegogo/$f" ".agents/skills/vibesdegogo/$f" || echo "OUT OF SYNC: $f"
+done
+```
+
+これ以外のファイルはすべてエディション固有であり、内容が異なるのが正常です。
 
 ## commit スタイル
 
@@ -74,8 +108,8 @@ PR を開く前に:
 
 - `bash tests/run-all.sh` を走らせる
 - 変更したスクリプトの構文チェックを走らせる
-- 変更が Claude / Codex / 両方のどれに影響するか明記する
-- 共有ワークフロー契約に変更がある場合は edition parity ドキュメントを更新する
+- 変更が hook、state helper、workflow docs のどれに影響するかに加え、
+  Claude Code 版、Codex 版、または両方のどれに入るかを明記する
 
 ## バージョニング
 

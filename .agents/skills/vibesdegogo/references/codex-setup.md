@@ -5,8 +5,8 @@
 For normal cross-repository use, install the Codex edition into Codex's user skill directory:
 
 ```bash
-mkdir -p "$HOME/.codex/skills"
-cp -R .agents/skills/vibesdegogo "$HOME/.codex/skills/vibesdegogo"
+mkdir -p "$HOME/.agents/skills"
+cp -R .agents/skills/vibesdegogo "$HOME/.agents/skills/vibesdegogo"
 ```
 
 If you do not copy the skill, set `VDGG_CODEX_SKILL_DIR` in the hook command to the absolute checkout path of `.agents/skills/vibesdegogo`.
@@ -26,10 +26,10 @@ Restart Codex if the skill does not appear after checkout or edits.
 Recommended setup is global hooks, so VDGG rules apply in every repository without copying `.codex/hooks.json` into each project. The examples below assume the skill is installed at:
 
 ```text
-$HOME/.codex/skills/vibesdegogo/
+$HOME/.agents/skills/vibesdegogo/
 ```
 
-Then add the hook commands to `~/.codex/hooks.json` or the equivalent Codex hook config. The commands should point to the installed skill path:
+Then add the hook commands to `~/.codex/hooks.json` or the equivalent Codex hook config. The commands should point to the installed skill path. `UserPromptSubmit` makes VDGG the default workflow for coding work in any git repository; the tool hooks enforce state once VDGG starts.
 
 ```json
 {
@@ -40,7 +40,7 @@ Then add the hook commands to `~/.codex/hooks.json` or the equivalent Codex hook
         "hooks": [
           {
             "type": "command",
-            "command": "bash -lc 'VDGG_CODEX_SKILL_DIR=\"${VDGG_CODEX_SKILL_DIR:-$HOME/.codex/skills/vibesdegogo}\"; bash \"$VDGG_CODEX_SKILL_DIR/scripts/vdgg-hook-pretool.sh\"'",
+            "command": "bash -lc 'VDGG_CODEX_SKILL_DIR=\"${VDGG_CODEX_SKILL_DIR:-$HOME/.agents/skills/vibesdegogo}\"; bash \"$VDGG_CODEX_SKILL_DIR/scripts/vdgg-hook-pretool.sh\"'",
             "timeout": 5
           }
         ]
@@ -52,7 +52,7 @@ Then add the hook commands to `~/.codex/hooks.json` or the equivalent Codex hook
         "hooks": [
           {
             "type": "command",
-            "command": "bash -lc 'VDGG_CODEX_SKILL_DIR=\"${VDGG_CODEX_SKILL_DIR:-$HOME/.codex/skills/vibesdegogo}\"; bash \"$VDGG_CODEX_SKILL_DIR/scripts/vdgg-hook-posttool.sh\"'",
+            "command": "bash -lc 'VDGG_CODEX_SKILL_DIR=\"${VDGG_CODEX_SKILL_DIR:-$HOME/.agents/skills/vibesdegogo}\"; bash \"$VDGG_CODEX_SKILL_DIR/scripts/vdgg-hook-posttool.sh\"'",
             "timeout": 5
           }
         ]
@@ -63,7 +63,18 @@ Then add the hook commands to `~/.codex/hooks.json` or the equivalent Codex hook
         "hooks": [
           {
             "type": "command",
-            "command": "bash -lc 'VDGG_CODEX_SKILL_DIR=\"${VDGG_CODEX_SKILL_DIR:-$HOME/.codex/skills/vibesdegogo}\"; bash \"$VDGG_CODEX_SKILL_DIR/scripts/vdgg-hook-stop.sh\"'",
+            "command": "bash -lc 'VDGG_CODEX_SKILL_DIR=\"${VDGG_CODEX_SKILL_DIR:-$HOME/.agents/skills/vibesdegogo}\"; bash \"$VDGG_CODEX_SKILL_DIR/scripts/vdgg-hook-stop.sh\"'",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -lc 'VDGG_CODEX_SKILL_DIR=\"${VDGG_CODEX_SKILL_DIR:-$HOME/.agents/skills/vibesdegogo}\"; bash \"$VDGG_CODEX_SKILL_DIR/scripts/vdgg-hook-userprompt.sh\"'",
             "timeout": 5
           }
         ]
@@ -73,7 +84,7 @@ Then add the hook commands to `~/.codex/hooks.json` or the equivalent Codex hook
 }
 ```
 
-The hook scripts no-op unless the current repository has `.codex/.vdgg-active`, so global registration is safe for non-VDGG work.
+The hook scripts no-op unless the current repository has `.codex/.vdgg-active`, so global registration is safe for non-VDGG work. One exception: a repository whose `.vdgg-target` sets `VDGG_REQUIRED=on` denies code-modifying tools while no session is armed (see "Entry Gate: VDGG_REQUIRED" in SKILL.md) — that is the key's purpose, and repositories without the key are untouched.
 
 ## Enable hooks repo-locally
 
@@ -83,7 +94,7 @@ Repo-local hooks are useful for developing this repository, but they do not prot
 
 `jq` is required because the hook scripts parse Codex hook JSON.
 
-## Verified upstream behavior
+## Upstream behavior (per Codex docs)
 
 The Codex docs say:
 
@@ -98,6 +109,15 @@ Sources:
 - https://developers.openai.com/codex/hooks
 - https://github.com/openai/codex/releases/tag/rust-v0.124.0
 
-## Known limitation
+## Known limitations
 
 VibesDeGoGo! for Codex follows the Claude Code step model, but hook parity is not exact. The Codex hook docs explicitly warn that `PreToolUse` is a guardrail rather than a complete enforcement boundary. Treat hooks as safety rails, not a sandbox or proof of correctness.
+
+- Scope: hooks are confirmed to fire in the interactive Codex CLI (checked
+  against 0.139.0). In our testing, `codex exec` (non-interactive) did not
+  fire hooks at all, so VDGG enforcement does not apply there.
+- `PostToolUse` payload shape varies by Codex version: some versions deliver
+  `tool_response` as an object with `exit_code`/`stderr`, others (e.g.
+  0.139.0) as a plain string. With the string form there is no exit code, so
+  Bash failure detection falls back to scanning the response text for error
+  patterns — best-effort, not a reliable success/failure signal.

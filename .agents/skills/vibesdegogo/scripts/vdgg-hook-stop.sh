@@ -12,6 +12,9 @@ STOP_HOOK_ACTIVE=$(printf '%s' "$INPUT" | jq -r '.stop_hook_active // false')
 
 CWD=$(printf '%s' "$INPUT" | jq -r '.cwd // empty')
 [ -n "$CWD" ] || CWD=$(pwd)
+if ROOT=$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null); then
+  CWD="$ROOT"
+fi
 ACTIVE_FILE="$CWD/.codex/.vdgg-active"
 [ -f "$ACTIVE_FILE" ] || { printf '{}\n'; exit 0; }
 VDGG_ID=$(cat "$ACTIVE_FILE")
@@ -31,7 +34,6 @@ PHASE=$(grep '^phase=' "$STATE_FILE" | cut -d= -f2 || true)
 cat <<EOF
 {
   "decision": "block",
-  "reason": "VibesDeGoGo! for Codex [${VDGG_ID}] is still active at step=${STEP}, phase=${PHASE}. Continue the workflow, clear state after Step 9, or output [Intentional Stop] with the reason."
+  "reason": "VibesDeGoGo! for Codex [${VDGG_ID}] is still active at step=${STEP}, phase=${PHASE}. Continue the workflow, clear state after Step 9, or output [Intentional Stop] with the reason. Waiting on a background subagent/task to finish is a legitimate reason to stop — say so with [Intentional Stop]."
 }
 EOF
-

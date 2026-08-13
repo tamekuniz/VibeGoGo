@@ -1,5 +1,12 @@
 .DS_Store
+
+# Codex / VibesDeGoGo!
+.codex/.vdgg-*
+
+# Claude Code / VibesDeGoGo!
 .claude/.vdgg-*
 tasks/vdgg/
+
+# Field Ops
 .claude/.fop-*
 tasks/fop/

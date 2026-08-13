@@ -1,66 +1,97 @@
-> **⚠️ This repository is superseded and no longer maintained.**
-> Its contents are frozen at 2026-06-07 and are missing every feature added since.
-> The maintained editions are
-> [VibesDeGoGo-for-Claude-Code](https://github.com/tmknzz/VibesDeGoGo-for-Claude-Code)
-> and [VibesDeGoGo-for-Codex](https://github.com/tmknzz/VibesDeGoGo-for-Codex).
-> Do not read this repository as the current specification.
-
 **English** | [日本語](README.ja.md)
 
 # VibesDeGoGo!
 
-VibesDeGoGo! is a state-and-hook workflow that keeps AI coding agents moving until the work is actually done, while stopping only before constraint violations.
+A state-and-hook workflow for AI coding agents. It keeps the agent moving through requirements, investigation, implementation, verification, and commit, but stops it before unchecked assumptions, skipped verification, or scope drift.
 
-This repository currently contains two editions:
+One asymmetry runs the whole thing:
 
-- **VibesDeGoGo! for Claude Code:** the original Claude Code skill and hook workflow in `skills/vibesdegogo/`.
-- **VibesDeGoGo! for Codex:** the Codex skill and hook workflow in `.agents/skills/vibesdegogo/`, with global hooks recommended and `.codex/hooks.json` available for this repository.
+- Don't stop to ask permission — no "can I continue?", it keeps moving.
+- Do stop before a constraint violation — a new dependency, touching auth / persistence / billing / security, a destructive op, or drifting out of the agreed scope: it halts and asks first.
 
-It exists because vibe coding is powerful, but AI agents can skip the boring parts: requirements, investigation, verification, and clear handoff. VibesDeGoGo! turns those parts into rails.
+The rules are enforced by hooks (`PreToolUse` / `PostToolUse` / `Stop`) plus a state file, not by prompt text, and a task gate cross-checks the actual file changes against the allowlist you declared. The hooks are a guardrail, not a sandbox — strong rails plus an audit trail, not proof of correctness.
 
-The core idea:
+bash + jq. No account, keys, or telemetry. MIT.
 
-- do not stop for progress confirmation
-- do stop before constraint violations
-- write requirements before implementation
-- investigate existing code before planning
-- verify before completion
-- use state files and hooks so the workflow is enforced mechanically, not just by prompt text
+## Editions
 
-## What It Is
+This repository holds two editions that share the workflow but target different agents:
 
-VibesDeGoGo! is designed for practical AI-assisted coding sessions where the user wants to make one request and have the agent carry it through:
+- **for Claude Code** — `skills/vibesdegogo/`, `hooks/hooks.json`, `.claude-plugin/`
+- **for Codex** — `.agents/skills/vibesdegogo/`, `.codex/hooks.json`
 
-1. agree on Goal / Constraints / Acceptance criteria
-2. write `requirements.md`
-3. investigate the codebase and write `investigation.md`
-4. create `todo.md` and `progress.md`
-5. implement one task at a time
-6. test or otherwise verify
-7. reflect and retry on failures
-8. update progress and version metadata
-9. commit, and optionally push
+They are installed independently. Install only the edition you use, or both.
 
-It is intentionally strict on the agent side and lightweight on the user side.
+## Core Flow
 
-## Key Rules
+1. Agree on Goal / Constraints / Acceptance criteria.
+2. Write `tasks/vdgg/{id}/requirements.md`.
+3. Investigate the codebase and write `investigation.md`.
+4. Create `todo.md` and `progress.md`.
+5. Implement one bounded task at a time.
+6. Verify with concrete checks.
+7. Pass the review gate (simplify or an external review).
+8. Update progress and ask for validation when needed.
+9. Commit, and for the default `branch-pr` workflow, create a PR and stop.
+   (A PR — pull request — is GitHub's "review this change" page. Nothing
+   reaches the main code until you approve the merge.)
 
-- **No progress confirmation:** the agent must not stop with "Can I continue?"
-- **Constraint confirmation required:** the agent must stop before changing constraints, adding dependencies, using non-standard implementations, changing persistence/API/billing/analytics contracts, touching security-sensitive behavior, or performing destructive operations.
-- **Standard-first:** use the platform/framework standard components, APIs, and patterns first. If that is not enough, report the reason and alternatives before implementation.
-- **Verification required:** do not mark a task complete without tests, build verification, smoke checks, or explicit manual verification steps where automation is not possible.
-- **Push behavior is workflow-specific:** default `branch-pr` pushes the feature branch to create a PR; `trunk` pushes only when `.vdgg-target` sets `AUTO_PUSH=true`.
+## Per-Step AI Formations
 
-## Modes
-
-- **Full flow:** default for normal coding work.
-- **Self-maintenance mode:** only for changes under `skills/vibesdegogo/`; keeps VibesDeGoGo! self-edits focused while preserving core checks.
-- **Lightweight mode:** for small, closed changes in general projects. It still requires fixed scope, existing patterns, no new dependencies, and explicit verification. It escalates to full flow when tests fail twice, scope expands, or specification judgment is needed.
-- **Friendly completion reports:** final messages start with plain-language status and next steps, with Git details separated into a short technical note.
-
-## Repository Layout
+A named Formation can assign any AI to each Step. Trusted configuration lives outside the repository under `~/.config/vdgg`:
 
 ```text
+~/.config/vdgg/
+  formations/local-balanced.conf
+  executors/qwen.conf
+  executors/gemma.conf
+```
+
+One line per delegated seat; unlisted seats stay inline (the current agent). `*` assigns the non-interactive seats (3, 4, 6, 6R, 7) at once, and the builtins `claude` / `codex` take optional model and effort tokens:
+
+```text
+# formations/local-balanced.conf
+6: qwen
+7: gemma
+grill: qwen
+```
+
+Delegating every delegable seat to Codex is one line:
+
+```text
+*: codex
+```
+
+Builtins with model/effort:
+
+```text
+6: claude sonnet low
+7: codex high
+```
+
+Each executor file contains only an absolute path to a no-argument wrapper. VDGG executes that file directly rather than evaluating a shell command string.
+
+```ini
+# ~/.config/vdgg/executors/qwen.conf
+COMMAND=/Users/you/.local/bin/vdgg-qwen
+```
+
+When you select a Formation, Step 1 pins it in state:
+
+```bash
+vdgg_state_init --formation local-balanced
+```
+
+The wrapper receives `VDGG_EXECUTOR_FORMATION`, `VDGG_EXECUTOR_AI`, `VDGG_EXECUTOR_STEP`, `VDGG_EXECUTOR_INPUT`, and `VDGG_EXECUTOR_OUTPUT`. Executor failure preserves state and stops; it never silently falls back to `inline`. With no Formation, the historical inline behavior and `.vdgg-target` executor settings remain unchanged.
+
+## Layout
+
+```text
+.claude-plugin/
+  plugin.json
+  marketplace.json
+hooks/
+  hooks.json
 skills/vibesdegogo/
   SKILL.md
   scripts/
@@ -75,9 +106,47 @@ skills/vibesdegogo/
     hook_rules.md
     state_helpers.md
     subagent_prompts.md
+
+.agents/skills/vibesdegogo/
+  SKILL.md
+  scripts/
+    vdgg-state.sh
+    vdgg-hook-pretool.sh
+    vdgg-hook-posttool.sh
+    vdgg-hook-stop.sh
+    vdgg-hook-userprompt.sh
+  references/
+    codex-setup.md
+.codex/hooks.json
+
+tests/
 ```
 
-## Install: VibesDeGoGo! for Claude Code
+Six files are duplicated between the two trees on purpose and must stay byte-identical: the three executor wrappers (`vdgg-llm-start.sh`, `vdgg-exec-claude.sh`, `vdgg-exec-codex.sh`) and the three shared references (`servers-conf.md`, `servers.conf.example`, `local-inference-setup.md`). See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Install: Claude Code edition
+
+### As a plugin (recommended)
+
+Inside Claude Code, run:
+
+```text
+/plugin marketplace add tmknzz/VibesDeGoGo
+/plugin install vibesdegogo@vibesdegogo
+```
+
+This registers the skill and activates the hooks automatically.
+
+**Migrating from `tmknzz/VibesDeGoGo-for-Claude-Code`:** that marketplace and this one both publish under the name `vibesdegogo`. Remove the old one before adding this one, so the two never coexist:
+
+```text
+/plugin uninstall vibesdegogo@vibesdegogo
+/plugin marketplace remove vibesdegogo
+/plugin marketplace add tmknzz/VibesDeGoGo
+/plugin install vibesdegogo@vibesdegogo
+```
+
+### Manual install
 
 Copy the skill folder into Claude Code's skills directory:
 
@@ -92,8 +161,28 @@ Then register the hooks shown in:
 skills/vibesdegogo/references/setup.md
 ```
 
-`jq` is required because the hooks parse Claude Code hook JSON. If it is not
-already installed, pick the command for your platform:
+## Install: Codex edition
+
+For local authoring, Codex reads repo skills from `.agents/skills` in this repository.
+
+For cross-repository use, install the skill in a user-level skill directory:
+
+```bash
+mkdir -p "$HOME/.agents/skills"
+cp -R .agents/skills/vibesdegogo "$HOME/.agents/skills/vibesdegogo"
+```
+
+Then register global hooks in `~/.codex/hooks.json` or `~/.codex/config.toml`. The global `UserPromptSubmit` hook makes VDGG the default for coding work in any git repository. The tool hooks enforce the workflow after VDGG state is initialized in that repository root. See:
+
+```text
+.agents/skills/vibesdegogo/references/codex-setup.md
+```
+
+Project-local hooks are included in `.codex/hooks.json`. In Codex, use `/hooks` to review and trust them.
+
+## Requirements
+
+`jq` is required because the hook scripts parse hook JSON:
 
 ```bash
 brew install jq               # macOS
@@ -102,37 +191,7 @@ apk add jq                    # Alpine
 sudo dnf install jq           # Fedora / RHEL
 ```
 
-## Install: VibesDeGoGo! for Codex
-
-For cross-repository use, install the Codex edition as a user skill:
-
-```bash
-mkdir -p "$HOME/.codex/skills"
-cp -R .agents/skills/vibesdegogo "$HOME/.codex/skills/vibesdegogo"
-```
-
-Codex also reads repository skills from `.agents/skills`, so the Codex edition is present in this repository for development:
-
-```text
-.agents/skills/vibesdegogo/
-```
-
-For normal Codex use, install global hooks in `~/.codex/hooks.json` or `~/.codex/config.toml` so VDGG rules apply across repositories. The hook scripts no-op unless the current repository has `.codex/.vdgg-active`.
-
-This repository also includes project-local hooks in `.codex/hooks.json` after the project hook definitions are reviewed and trusted:
-
-```text
-.codex/hooks.json
-```
-
-In Codex, use `/hooks` to review and trust the hook definitions. See:
-
-```text
-.agents/skills/vibesdegogo/references/codex-setup.md
-```
-
-`jq` is required because the hooks parse Codex hook JSON. See the Claude Code
-section above for per-platform install commands.
+Without `jq`, the hooks do nothing and stay out of the way in repositories where no VibesDeGoGo! session is running.
 
 ## Project Configuration
 
@@ -151,12 +210,36 @@ AUTO_PUSH=false
 
 With the default `WORKFLOW=branch-pr`, Step 9 pushes the feature branch so it can open a PR. `AUTO_PUSH=true` only affects `WORKFLOW=trunk`.
 
-## Why Free
+## Uninstall
 
-VibesDeGoGo! is free and open source.
+The complete footprint, so you (or your agent) can remove everything.
 
-Vibe coding gave me a way to build with joy. This project is my small thank-you back to that world: a set of safety rails so more people can enjoy building with AI without feeling lost or unsafe.
+**Claude Code edition:**
+
+- Plugin install: run `/plugin uninstall vibesdegogo@vibesdegogo` inside Claude Code (or `claude plugin uninstall vibesdegogo@vibesdegogo` from a terminal).
+- Manual install: delete `~/.claude/skills/vibesdegogo/` and remove the four hook entries (`PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`) that reference `vdgg-hook-*.sh` from `~/.claude/settings.json`.
+- Per-repository session artifacts: `.claude/.vdgg-*` and `tasks/vdgg/` are safe to delete. `.gitignore` gains an auto-appended block for `.claude/.vdgg-*`; drop it if you like.
+
+**Codex edition:**
+
+- Delete `~/.agents/skills/vibesdegogo/`.
+- Remove the four hook entries (`PreToolUse`, `PostToolUse`, `Stop`, `UserPromptSubmit`) that reference `vdgg-hook-*.sh` from `~/.codex/hooks.json`.
+- Per-repository session artifacts: `.codex/.vdgg-*` and `tasks/vdgg/` are safe to delete. `.gitignore` gains an auto-appended block for `.codex/.vdgg-*`; drop it if you like.
+
+Both editions: keep `.vdgg-target` — it is your configuration file, not something VDGG installed.
+
+## Test
+
+```bash
+bash tests/run-all.sh
+```
+
+Both editions' suites run from this one directory.
+
+## Optional: MAGI
+
+If you also install **MAGI** (a small open-source 3-persona deliberation skill), VibesDeGoGo! uses it at two points — and silently skips it if you don't: **Step 0** to deliberate a genuinely split, high-stakes decision (it hands back material; you still decide), and **Step 7** as the review gate for subjective artifacts (docs, copy, design). MAGI judges desirability, not code correctness. → https://github.com/tmknzz/MAGI
 
 ## Status
 
-This is an opinionated workflow extracted from real daily use. It is not a general-purpose CI/CD system. It is a guardrailed operating procedure for AI coding agents.
+This repository holds both editions. They were previously maintained in separate repositories (`VibesDeGoGo-for-Claude-Code` and `VibesDeGoGo-for-Codex`), whose histories are merged into this one.

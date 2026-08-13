@@ -22,5 +22,4 @@
 ## Parity Checklist
 
 - [ ] I checked whether this affects the shared Claude/Codex workflow contract.
-- [ ] I updated `skills/vibesdegogo/references/edition_parity.md` if needed.
 - [ ] I avoided broad `sed -i` rewrites for hook/state comments.

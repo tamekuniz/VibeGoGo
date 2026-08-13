@@ -46,6 +46,12 @@ Rules:
 [VibesDeGoGo! Step N Start] step=N, phase=PHASE_NAME, loop=LOOP_COUNT
 ```
 
+## Delegate Line
+
+```text
+[VibesDeGoGo! Delegate] step=N, executor=<model or command>, role=<short role>
+```
+
 ## requirements.md
 
 ```markdown
@@ -70,6 +76,7 @@ Required headings:
 5. `## 5. Side effects and risks`
 6. `## 6. Constraints`
 7. `## 7. Verification strategy`
+8. `## 8. Lessons applied`
 
 ## Reflection Entry In progress.md
 
@@ -109,6 +116,9 @@ What I verified:
 
 Next action:
 - Review the GitHub PR. If it looks good, tell me to merge it.
+  (A pull request is GitHub's confirmation page for a proposed change:
+   it shows exactly what would change, and nothing lands in your main
+   branch until you approve the merge.)
 
 Build/version numbers:
 - <values or none configured>

@@ -1,0 +1,14 @@
+{
+  "name": "vibesdegogo",
+  "owner": {
+    "name": "tmknzz"
+  },
+  "description": "VibesDeGoGo! state-and-hook workflow for Claude Code",
+  "plugins": [
+    {
+      "name": "vibesdegogo",
+      "source": ".",
+      "description": "A state-and-hook workflow that keeps coding agents moving until done while stopping only before constraint violations."
+    }
+  ]
+}

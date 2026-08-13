@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash -lc 'repo=$(git rev-parse --show-toplevel 2>/dev/null || pwd); skill=\"${VDGG_CODEX_SKILL_DIR:-$repo/.agents/skills/vibesdegogo}\"; [ -f \"$skill/scripts/vdgg-hook-pretool.sh\" ] || skill=\"$HOME/.codex/skills/vibesdegogo\"; bash \"$skill/scripts/vdgg-hook-pretool.sh\"'",
+            "command": "bash -lc 'repo=$(git rev-parse --show-toplevel 2>/dev/null || pwd); skill=\"${VDGG_CODEX_SKILL_DIR:-$repo/.agents/skills/vibesdegogo}\"; [ -f \"$skill/scripts/vdgg-hook-pretool.sh\" ] || skill=\"$HOME/.agents/skills/vibesdegogo\"; bash \"$skill/scripts/vdgg-hook-pretool.sh\"'",
             "timeout": 5,
             "statusMessage": "Checking VibesDeGoGo! workflow state"
           }
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash -lc 'repo=$(git rev-parse --show-toplevel 2>/dev/null || pwd); skill=\"${VDGG_CODEX_SKILL_DIR:-$repo/.agents/skills/vibesdegogo}\"; [ -f \"$skill/scripts/vdgg-hook-posttool.sh\" ] || skill=\"$HOME/.codex/skills/vibesdegogo\"; bash \"$skill/scripts/vdgg-hook-posttool.sh\"'",
+            "command": "bash -lc 'repo=$(git rev-parse --show-toplevel 2>/dev/null || pwd); skill=\"${VDGG_CODEX_SKILL_DIR:-$repo/.agents/skills/vibesdegogo}\"; [ -f \"$skill/scripts/vdgg-hook-posttool.sh\" ] || skill=\"$HOME/.agents/skills/vibesdegogo\"; bash \"$skill/scripts/vdgg-hook-posttool.sh\"'",
             "timeout": 5,
             "statusMessage": "Recording VibesDeGoGo! tool result"
           }
@@ -31,8 +31,20 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash -lc 'repo=$(git rev-parse --show-toplevel 2>/dev/null || pwd); skill=\"${VDGG_CODEX_SKILL_DIR:-$repo/.agents/skills/vibesdegogo}\"; [ -f \"$skill/scripts/vdgg-hook-stop.sh\" ] || skill=\"$HOME/.codex/skills/vibesdegogo\"; bash \"$skill/scripts/vdgg-hook-stop.sh\"'",
+            "command": "bash -lc 'repo=$(git rev-parse --show-toplevel 2>/dev/null || pwd); skill=\"${VDGG_CODEX_SKILL_DIR:-$repo/.agents/skills/vibesdegogo}\"; [ -f \"$skill/scripts/vdgg-hook-stop.sh\" ] || skill=\"$HOME/.agents/skills/vibesdegogo\"; bash \"$skill/scripts/vdgg-hook-stop.sh\"'",
             "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -lc 'VDGG_CODEX_SKILL_DIR=\"${VDGG_CODEX_SKILL_DIR:-$HOME/.agents/skills/vibesdegogo}\"; bash \"$VDGG_CODEX_SKILL_DIR/scripts/vdgg-hook-userprompt.sh\"'",
+            "timeout": 5,
+            "statusMessage": "Checking VibesDeGoGo! default workflow"
           }
         ]
       }

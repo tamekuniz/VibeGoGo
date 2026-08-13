@@ -1,0 +1,11 @@
+# Todo
+
+- [ ] T1: Port v1.7.1 improvements — `_vdgg_ensure_gitignore` in vdgg-state.sh; SKILL.md gains lightweight-mode version-bump item, "branch name MUST describe the change" + stay-on-feature-branch Step 1 snippet (removes the literal `<type>/<kebab-case-slug>` checkout footgun), simplify subagent consolidation section, severity-based findings response section.
+- [ ] T2: Review gate fix — pretool verified gate accepts simplify-sentinel OR review-sentinel; posttool marks `modified=1` on whichever sentinel exists; direct writes to sentinel paths blocked (Edit/Write + Bash literal paths); docs (SKILL.md Step 7, state_helpers.md, hook_rules.md); tests.
+- [ ] T3: Task allowlist/gate port from Codex edition — `vdgg_task_begin/changed_files/check_allowlist/gate/rollback` in vdgg-state.sh (state file gains `task_allowlist_file`/`task_base_ref`); pretool enforces allowlist in implementing/testing and requires gate at verified when allowlist exists; SKILL.md Steps 5–7; state_helpers.md; tests.
+- [ ] T4: jq fail-open when inactive — fallback grep parser locates cwd + `.vdgg-active`; no active session → exit 0; active session → fail closed with multi-distro hints (no auto-install); tests.
+- [ ] T5: Small cleanups — remove dead `*/${TASKS_DIR}/*` glob alternatives; remove `.vdgg-step-block-*` remnant references; document reflection same-second mtime edge in hook_rules.md.
+- [ ] T6: External review/executor options — `vdgg_review_run` helper (runs `REVIEW_COMMAND` or argv, writes review sentinel only on success); target_schema.md documents `REVIEW_COMMAND` and `STEP3/4/6_EXECUTOR`; SKILL.md Step 7 external-review path; subagent_prompts.md notes prompts double as external-executor prompts with artifact validation; tests.
+- [ ] T7: Plugin packaging — `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `hooks/hooks.json` with `${CLAUDE_PLUGIN_ROOT}` paths; SKILL.md `VDGG_SKILL_DIR` resolver; setup.md/README document plugin install + manual install; verify schema against official docs first.
+- [ ] T8: CI — `.github/workflows/test.yml` running `tests/run-all.sh` on ubuntu-latest and macos-latest with jq ensured.
+- [ ] T9: Docs finish — README guardrail honesty wording; README.ja.md; output_formats.md beginner one-liner explaining the PR in the final report; CHANGELOG entry; SKILL.md version bump to 0.3.0.

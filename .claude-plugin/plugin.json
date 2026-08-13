@@ -1,0 +1,12 @@
+{
+  "name": "vibesdegogo",
+  "displayName": "VibesDeGoGo!",
+  "description": "A state-and-hook workflow for Claude Code that keeps coding agents moving until done while stopping only before constraint violations.",
+  "version": "0.4.0",
+  "author": {
+    "name": "tmknzz"
+  },
+  "repository": "https://github.com/tmknzz/VibesDeGoGo",
+  "license": "MIT",
+  "keywords": ["workflow", "hooks", "autonomous-coding", "skill"]
+}

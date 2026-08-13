@@ -7,6 +7,15 @@ set -euo pipefail
 INPUT=$(cat)
 
 if ! command -v jq >/dev/null 2>&1; then
+    # Without jq the hook JSON cannot be parsed properly. Best-effort: extract
+    # cwd with grep/sed and check for an active VibesDeGoGo! session there. No
+    # active session -> stay out of the way so unrelated repositories are never
+    # blocked by a missing dependency.
+    FALLBACK_CWD=$(printf '%s' "$INPUT" | grep -oE '"cwd"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed -E 's/.*:[[:space:]]*"([^"]*)"$/\1/')
+    FALLBACK_CWD="${FALLBACK_CWD:-$PWD}"
+    if [ ! -f "$FALLBACK_CWD/.claude/.vdgg-active" ]; then
+        exit 0
+    fi
     # Allow the current Bash command through if it is itself an attempt to install jq.
     if printf '%s' "$INPUT" | grep -qE '"command"[[:space:]]*:[[:space:]]*"[^"]*(brew[[:space:]]+(install|reinstall)|apt(-get)?[[:space:]]+install|apk[[:space:]]+add|dnf[[:space:]]+install|yum[[:space:]]+install|pacman[[:space:]]+-S)[[:space:]]+[^"]*jq'; then
         exit 0
@@ -100,26 +109,24 @@ EOF
     fi
 fi
 
-# After simplify starts, any Edit/Write to implementation files marks the
-# sentinel as modified so verified is blocked until reflection/re-test.
+# After a review gate starts (simplify or explicit review), any Edit/Write to
+# implementation files marks the sentinel as modified so verified is blocked
+# until reflection/re-test. Both sentinel kinds get the same tracking.
 if [ "$PHASE" = "testing" ] && { [ "$TOOL_NAME" = "Edit" ] || [ "$TOOL_NAME" = "Write" ]; }; then
-    SENTINEL_FILE="$CWD/.claude/.vdgg-simplify-sentinel-${VDGG_ID}-${LOOP_COUNT}"
-    if [ -f "$SENTINEL_FILE" ]; then
-        EDITED_FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
-        # State files are internal workflow files, not implementation changes.
-        if [[ "$EDITED_FILE_PATH" == *"/.vdgg-state-"* ]] || [[ "$EDITED_FILE_PATH" == *"/.vdgg-active"* ]]; then
-            exit 0
-        fi
-        # Exclude sentinel file itself to avoid a self-referential modification loop
-        # when the sentinel is written via Edit/Write (e.g. in environments without
-        # the `simplify` Skill tool, where Bash heredoc is the fallback).
-        if [[ "$EDITED_FILE_PATH" == *"/.vdgg-simplify-sentinel-"* ]]; then
-            exit 0
+    EDITED_FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
+    for SENTINEL_FILE in \
+        "$CWD/.claude/.vdgg-simplify-sentinel-${VDGG_ID}-${LOOP_COUNT}" \
+        "$CWD/.claude/.vdgg-review-sentinel-${VDGG_ID}-${LOOP_COUNT}"; do
+        [ -f "$SENTINEL_FILE" ] || continue
+        # Sidecar files are internal workflow files, not implementation changes.
+        # (Pretool also blocks editing them; this guard is defense in depth.)
+        if [[ "$EDITED_FILE_PATH" == *".claude/.vdgg-"* ]]; then
+            continue
         fi
         # Task notes are workflow records, not implementation changes.
         TASKS_DIR_BASENAME="tasks/vdgg/${VDGG_ID}"
         if [[ "$EDITED_FILE_PATH" == *"$TASKS_DIR_BASENAME"* ]]; then
-            exit 0
+            continue
         fi
         # Append the edited file once.
         CURRENT_FILES=$(grep '^modified_files=' "$SENTINEL_FILE" | head -1 | sed 's/^modified_files=//')
@@ -140,8 +147,8 @@ modified=1
 modified_files=${NEW_FILES}
 EOF
         mv "$TMP" "$SENTINEL_FILE"
-        exit 0
-    fi
+    done
+    exit 0
 fi
 
 if [ "$TOOL_NAME" != "Bash" ]; then

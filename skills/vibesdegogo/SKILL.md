@@ -1,16 +1,8 @@
 ---
 name: "VibesDeGoGo!"
 description: "A state-and-hook workflow for Claude Code that keeps coding agents moving until done while stopping only before constraint violations."
-version: 0.2.0
+version: 0.4.0
 ---
-
-> **⚠️ SUPERSEDED COPY — frozen at 2026-06-07. Do not read this file as the current specification.**
-> The maintained version lives in
-> [VibesDeGoGo-for-Claude-Code](https://github.com/tmknzz/VibesDeGoGo-for-Claude-Code)
-> (Codex edition: [VibesDeGoGo-for-Codex](https://github.com/tmknzz/VibesDeGoGo-for-Codex)),
-> and the installed copy under `~/.claude/skills/vibesdegogo/` is what actually runs.
-> Features added after the freeze — Formation per-step model assignment, executor
-> delegation, the task gate, and external review — are absent here.
 
 # VibesDeGoGo!
 
@@ -26,13 +18,105 @@ Trigger phrases include `/VibesDeGoGo!`, "use VibesDeGoGo!", and similar request
 
 ## Agent Role
 
-- Declare before acting: output a Step declaration at the beginning of each Step.
+- Declare before acting: output a Step declaration at the beginning of each Step (unless `STEP_REPORT=quiet` — see Step reporting below).
 - Update the state file: every Step start and completion must update state through `vdgg_state_*` helpers.
 - Lead Steps 1, 2, 5, 8, and 9 directly.
 - Execute Steps 3, 4, 6, and 7 directly unless delegation is clearly better.
 - Delegate only when parallel execution helps or when multiple independent tasks can safely run at the same time.
 - Do not delegate merely to save context, because the area is unfamiliar, or because the work may take time.
 - Monitor subagents and correct direction if they drift.
+
+### Step reporting
+
+Whenever work is delegated to a subagent or an external executor, output one line in the user-facing text before the delegation:
+
+```text
+[VibesDeGoGo! Delegate] step=N, executor=<model or command>, role=<short role>
+```
+
+`.vdgg-target` may set `STEP_REPORT=quiet` (default: `verbose`; read it with the same safe key extraction as Step 1). Only the literal value `quiet` enables quiet mode; any other value behaves as `verbose`. In quiet mode, omit the chat Step declarations and interim narration. Bash-embedded state-transition declarations (see Step Declaration Format) are unchanged. Quiet mode never omits: the Step 0 agreement, Delegate lines, Lesson lines, `[Intentional Stop]`, `[Error Acknowledged]`, the Formation start-tier statement, the simplify-collapse reason, the Step 8 validation request, and the final completion report.
+
+### Delegated step executors
+
+Steps 3, 4, and 6 communicate only through files under `tasks/vdgg/{id}/`, so their executor is swappable. Two mechanisms exist and are mutually exclusive per session:
+
+1. **Step AI Formations** (preferred, shared with the Codex edition) — a named, complete Step-to-AI mapping that covers Step 0/3/4/6/6R/7/0-Grill Me from a single config file. See "Step AI Formations" below.
+2. **`.vdgg-target` `_COMMAND` keys + `STEP6_EXECUTOR_TIERS`** (legacy fallback) — per-step `STEP3_EXECUTOR_COMMAND` / `STEP4_EXECUTOR_COMMAND` and the Step 6 tier ladder `STEP6_EXECUTOR_TIERS`. Active only when no Formation is selected.
+
+Under either mechanism, output a Delegate line before delegation (see Step reporting), and validate the executor's artifacts yourself before advancing: the output file exists and contains the required headings; for Step 6, the task allowlist and `vdgg_task_gate` still apply, which catches any out-of-allowlist edits the executor made. Steps 1, 2, 5, 8, and 9 are never delegated regardless of mechanism.
+
+### Step AI Formations
+
+A Formation is a named, complete Step-to-AI assignment shared with the Codex edition. Select it before Step 0 with `VDGG_FORMATION=<name>` (environment variable) or an explicit user instruction. Before Step 0 consultation begins, source `vdgg-state.sh`, run `vdgg_formation_preflight <name>`, and resolve `STEP_0_AI` and `STEP_0_GRILL_AI` with that explicit name. Then pass the same name to `vdgg_state_init --formation <name>` in Step 1 (or set `VDGG_FORMATION` before calling `vdgg_state_init`, which reads it automatically). Formation files and executor definitions are trusted user configuration outside the repository, shared with the Codex edition:
+
+```text
+${VDGG_CONFIG_DIR:-$HOME/.config/vdgg}/
+  formations/<name>.conf
+  executors/<ai>.conf
+```
+
+Write one line per step, in order, so the whole lineup is visible at a glance:
+
+```text
+0: primary
+0G: primary
+1: primary
+2: primary
+3: sonnet5
+4: sonnet5
+5: primary
+6: sonnet5
+6R: fable5
+7: fable5
+8: primary
+9: primary
+--
+Everything below the separator is a free-form memo and is never read.
+```
+
+Syntax, one line per seat: `<seat>: <ai> [model] [effort]`.
+
+- Seats: `0`, `0G`, `1`, `2`, `3`, `4`, `5`, `6`, `6R`, `7`, `8`, `9` (case-insensitive; `grill` is still accepted as a synonym of `0G`), plus `*` which assigns `3, 4, 6, 6R, 7` at once — an explicit seat line wins over `*`. Every step can name the AI that runs it. Unlisted seats fall back to `primary`.
+- Values: `primary` — the model this session is already running on, i.e. no delegation (`inline` is accepted as a synonym). The model shorthands `opus5`, `sonnet5`, `fable5`, `haiku45`, which expand to the bundled `claude` wrapper plus the full model id. The builtins `claude` / `codex`, which run the bundled `scripts/vdgg-exec-claude.sh` / `vdgg-exec-codex.sh` wrappers with optional model and effort tokens — effort is recognized by a closed vocabulary (claude: `low|medium|high`, codex: `minimal|low|medium|high|xhigh`), any other token is the model. Or a bare executor name resolved through `executors/<name>.conf` containing one `COMMAND=/absolute/path/to/executable` line; bare names and model shorthands take no extra tokens — bake fixed settings into that command.
+- A lone `--` line ends the configuration. Everything below it is a memo: no comment marker is needed and nothing there is parsed, so it cannot break the file.
+- The parser never sources these files and the command is executed directly, not through a shell string. Tokens must start with an alphanumeric so they can never reach an executor's argv as a flag.
+
+When a Formation is selected, resolve the assigned AI before acting in every Step with `vdgg_formation_resolve <STEP_KEY>`. Use `STEP_6R_AI` for reflection and `STEP_0_GRILL_AI` for Grill Me. Then:
+
+1. `inline`: work normally in the current agent.
+2. External AI: write the smallest sufficient input artifact under `tasks/vdgg/{id}/`, output the Delegate line, and call `vdgg_executor_run <STEP_KEY> <input-file> [output-file]`.
+3. Validate the expected artifact before advancing. A non-zero executor result, missing output, unknown AI, or invalid Formation stops the workflow with state unchanged. Never silently fall back to `inline` or to the legacy `_COMMAND`/`STEP6_EXECUTOR_TIERS` path.
+
+The executor receives `VDGG_EXECUTOR_FORMATION`, `VDGG_EXECUTOR_AI`, `VDGG_EXECUTOR_STEP`, `VDGG_EXECUTOR_INPUT`, and `VDGG_EXECUTOR_OUTPUT`. State transitions, task allowlists, review gates, and commit permissions remain owned by the controlling VDGG session — Claude Code hooks continue to enforce them.
+
+Naming an AI on a seat assigns the *work product* of that step, never the mechanics: state transitions, task allowlists, review gates, and commit permissions stay with the controlling VDGG session at every step, and the Claude Code hooks continue to enforce them. So an AI named on Step 1, 2, 5, 8, or 9 drafts or decides the artifact for that step — the branch name, `requirements.md`, the next task and its allowlist, the progress update, the commit message — while this session performs the state write, the gate arming, and the git operation. Seats `0` and `0G` are conversational, so a bundled one-shot wrapper there answers in a single pass instead of holding a dialogue; use a bare executor that can own the conversation when that matters.
+
+Relationship with the legacy path: when a Formation is selected, `STEP3_EXECUTOR_COMMAND`, `STEP4_EXECUTOR_COMMAND`, and `STEP6_EXECUTOR_TIERS` are ignored — the Formation's `STEP_3_AI`/`STEP_4_AI`/`STEP_6_AI` are authoritative. When no Formation is selected, the legacy `_COMMAND` keys and the tier ladder below apply as historically. Do not mix both in the same session.
+
+### Local llama-server executors
+
+When a Formation assigns a Step to an executor backed by a locally-hosted `llama-server` (llama.cpp), VDGG ships two helpers so the server configuration lives in one declarative file instead of being scattered across `~/.zshrc`, launchd plists, and executor wrapper scripts:
+
+- [`references/servers-conf.md`](references/servers-conf.md) — schema and CLI contract for `${VDGG_CONFIG_DIR:-$HOME/.config/vdgg}/servers.conf` (source of truth).
+- [`references/servers.conf.example`](references/servers.conf.example) — a copy-and-edit fixture.
+- [`scripts/vdgg-llm-start.sh`](scripts/vdgg-llm-start.sh) — a thin wrapper: `--check`, `--dry-run <id>`, `<id>` (exec).
+- [`references/local-inference-setup.md`](references/local-inference-setup.md) — first-run walkthrough for macOS launchd (tested) and Linux systemd (schema-compatible, awaiting community verification).
+
+Executor `COMMAND=` lines can then call `vdgg-llm-start <id>` through a wrapper that sends the actual request to `http://127.0.0.1:<port>`. Only the port/api key move; the executor script itself no longer hard-codes them.
+
+### Step 6 Executor Tiers (no Formation)
+
+Applies only when no Formation is selected (`VDGG_FORMATION` unset and no `--formation` given to `vdgg_state_init`). When a Formation is active, this section does not apply — use `STEP_6_AI` from the Formation instead.
+
+Activation: when `.vdgg-target` sets `STEP6_EXECUTOR_TIERS` (see `references/target_schema.md`), Step 6 uses a tier ladder instead of a single executor. The value is an ordered `|`-separated list of executor commands, cheapest first; the reserved terminal tier `inline` means the agent implements the task itself. When `STEP6_EXECUTOR_TIERS` is unset, Step 6 runs inline.
+
+Start tier: each task starts at tier 1. Exception — the agent MAY start a task at a higher tier when the task is clearly heavyweight: contract changes (API, persistence, auth, security), changes spanning multiple modules, or concurrency-sensitive work. State the chosen start tier and the reason in the user-facing text.
+
+Escalation rule: the first verification failure of a task stays on the same tier — go through reflection (Step 6-R) and retry on that tier. When the same task fails verification a second time (the re-implementation that would run at loop=2), escalate to the next tier: run `vdgg_task_rollback` to restore the baseline so the higher tier re-implements cleanly, and pass the accumulated `investigation-r*.md` notes to the next tier's prompt (the `failure notes` input in `references/subagent_prompts.md`). `inline` is the last tier and follows the normal flow with no further escalation. If the ladder does not end with `inline`, the last configured tier is treated the same way — its further failures do not escalate; stay on that tier and continue the normal reflection loop.
+
+Review ordering: run the external review (`REVIEW_COMMAND` / `vdgg_review_run`) only after `vdgg_task_gate` verification has passed, so failed cheap-tier attempts never consume external review quota. On review findings (high/medium), the CURRENT tier applies the findings first; if the review rejects the work a second time, escalate one tier (same rollback-and-handoff procedure).
+
+Record keeping: record in `progress.md`, per task, the settling tier and loop count (e.g. `T1: settled at tier 1, loop=0` / `T2: escalated to tier 2, loop=2`). The final completion report must include a one-line-per-task Formation summary in the same form.
 
 ## Standard-First Contract
 
@@ -82,7 +166,8 @@ Minimum flow:
 2. Use `rg` and targeted reads to inspect the change site and direct references.
 3. Make the smallest change that follows existing patterns.
 4. Run the declared verification. Do not skip verification.
-5. Report only changes, verification result, and residual risk.
+5. If the change will be built, deployed, or committed and `.vdgg-target` configures version files (`VERSION_FILE_*_PATH` / `_KEY`), bump each configured key to a value newer than `HEAD` before building/deploying. This is the only Step 8 obligation lightweight mode keeps; do not skip it just because the rest of Step 8 is omitted.
+6. Report only changes, verification result, and residual risk.
 
 Escalate to full flow if tests fail twice, scope expands, specification or compatibility judgment is needed, custom implementation looks necessary, verification is unclear, or the agent is about to proceed on a guess.
 
@@ -147,16 +232,67 @@ Draft these three items in chat. Ask questions only for ambiguity that cannot be
 
 Step 0 is not mechanically enforced because no state file exists yet.
 
+## Step 0 Mode: Consultation (壁打ち)
+
+When the requirements cannot yet be safely fixed, run Step 0 as a consultation (壁打ち) before drafting Goal / Constraints / Acceptance. Enter this mode when any of these hold: the goal is ambiguous; the work is subjective or creative — docs, naming, copy, design, a handbook, anything an AI can produce where "good" lives in the user's head, not only in code; the change is high-stakes or hard to reverse (public artifacts, contracts); or more than one defensible direction exists. For a clear, mechanical task with one obvious shape, skip this mode and draft the three items directly.
+
+Consultation is a sounding board. It is none of its three failure modes:
+
+- **Not guess-and-go:** do not silently pick one reading and start building.
+- **Not option-dumping:** do not hand over a bare list ("A, B, or C?") and make the user do the thinking.
+- **Not autonomous-finalize:** do not settle a subjective or scope question for the user behind a closed door.
+
+Loop until the WHAT is agreed:
+
+1. Name the decisions the result actually hinges on — real forks, not pseudo-choices. Raise a few at a time; do not flood.
+2. For each, lay out the trade-offs (what each option wins and loses) and give a recommendation with its reasoning. Recommend; do not merely survey.
+3. The user decides or redirects. On every subjective or scope question the user is the decider; the agent supplies the thinking, not the verdict.
+4. For a genuinely split, high-stakes fork, escalate that one point to a deeper, multi-perspective deliberation: run the MAGI skill if it is installed; if not, get a second opinion another way (a different model, or a structured review). Bring the output back as material — still for the user to decide.
+
+Do not relitigate a settled point, and do not stall: drive toward convergence. When the WHAT is agreed, leave consultation mode and write `requirements.md`. For subjective artifacts, record in Acceptance what "good" was agreed to mean, so completion stays checkable. Then proceed to Step 1.
+
+## Step 0 Helper: Grill Me (optional)
+
+The Consultation loop above is the baseline for resolving ambiguity. Grill Me is an optional third part — a question-driven interrogator that walks the decision tree one branch at a time — that can be slotted in **before** drafting Goal / Constraints / Acceptance, to pre-filter ambiguity through structured waves of questions, each with a recommended answer.
+
+When Grill Me is engaged, Step 0 runs in three layers before drafting:
+
+1. **Shallow consultation** — the baseline loop above raises real forks and gives recommendations.
+2. **Grill Me pass** — sequential question waves drive the user through unresolved branches, each question carrying a recommended answer; the user accepts, redirects, or rejects per question.
+3. **MAGI escalation** — for any remaining genuinely split, high-stakes fork, step 4 of the Consultation loop still applies (run MAGI if installed, else get a second opinion another way).
+
+Then drafting `requirements.md` proceeds as usual.
+
+Grill Me is a pre-filter, not a replacement for MAGI. Skipping Grill Me is safe because MAGI remains the deeper-deliberation backstop for high-stakes forks.
+
+Control via `.vdgg-target` (`references/target_schema.md`):
+
+- `GRILLME=off` (default): do not run Grill Me. Behavior is unchanged from the Consultation loop and MAGI escalation alone.
+- `GRILLME=on`: always run Grill Me at Step 0 before drafting, even for clear-shape tasks.
+- `GRILLME=auto`: run Grill Me when any of the Consultation entry conditions hold — the goal is ambiguous; the work is subjective or creative; the change is high-stakes; or more than one defensible direction exists. Same trigger list as Consultation itself, so they fire together.
+
+If the Grill Me skill is not installed, the setting is treated as `off` and Step 0 continues with Consultation. The orchestrating agent invokes the installed Grill Me skill directly; there is no shell helper for this (the same convention as MAGI escalation).
+
+If a selected Formation assigns `STEP_0_GRILL_AI` to an external AI, that executor owns the complete Grill Me conversation. Its command must keep the transcript out of stdout/stderr and write only the final handoff file. `vdgg_executor_run STEP_0_GRILL_AI <input> <output>` accepts that handoff only when its level-2 headings are exactly, in order: `Goal`, `Constraints`, `Acceptance criteria`, `Decisions`, and `Unresolved questions` (`vdgg_grill_validate_output` enforces this). The HQ consumes that file, not the conversation transcript. If the executor cannot own the interaction on the current surface, stop and report the limitation; do not relay every turn through HQ and call it equivalent.
+
 ## Step 1: Formation Declaration
 
-Initialize state:
+Initialize state. Source the state helpers in every Bash command that calls `vdgg_*` functions (shells do not persist between commands). For manual installs the helpers live at `$HOME/.claude/skills/vibesdegogo`; for plugin installs use this skill's base directory as announced when the skill loads:
 
 ```bash
-source $HOME/.claude/skills/vibesdegogo/scripts/vdgg-state.sh
-vdgg_state_init
+VDGG_SKILL_DIR="${VDGG_SKILL_DIR:-$HOME/.claude/skills/vibesdegogo}"
+# Plugin install: replace the default above with this skill's announced base directory.
+source "$VDGG_SKILL_DIR/scripts/vdgg-state.sh"
+if [ -n "${VDGG_FORMATION:-}" ]; then
+    vdgg_state_init --formation "$VDGG_FORMATION"
+else
+    vdgg_state_init
+fi
 ```
 
-For the default `branch-pr` workflow, create a feature branch after `vdgg_state_init` and before any code editing.
+`vdgg_state_init --formation <name>` validates the Formation file and every referenced executor before creating the state file; a failure leaves no session armed. The Formation name is persisted in the state file (`formation=` field) so subsequent Bash commands can call `vdgg_formation_resolve` without re-passing the name. See "Step AI Formations" above for the config directory and file format.
+
+For the default `branch-pr` workflow, create a feature branch after `vdgg_state_init` and before any code editing. The branch name MUST describe the change, not the workflow.
 
 Branch name is derived from the Step 0 Goal, not from the VibesDeGoGo! id. Pick a name in the form `{type}/{slug}` where:
 
@@ -166,19 +302,39 @@ Branch name is derived from the Step 0 Goal, not from the VibesDeGoGo! id. Pick 
 
 ```bash
 WORKFLOW=branch-pr; BASE_BRANCH=""
-if [ -f "$(pwd)/.vdgg-target" ]; then source "$(pwd)/.vdgg-target"; fi
+# Never `source` .vdgg-target: it is a repository-controlled file, and sourcing
+# it would execute any code an untrusted repo places there (e.g. WORKFLOW=x with
+# a trailing `$(...)`). Read only the needed keys and validate them.
+if [ -f "$(pwd)/.vdgg-target" ]; then
+    WORKFLOW=$(grep -m1 '^WORKFLOW=' "$(pwd)/.vdgg-target" | sed -E 's/^[^=]*=//; s/^"(.*)"$/\1/')
+    BASE_BRANCH=$(grep -m1 '^BASE_BRANCH=' "$(pwd)/.vdgg-target" | sed -E 's/^[^=]*=//; s/^"(.*)"$/\1/')
+    case "$WORKFLOW" in trunk|branch-pr) ;; *) WORKFLOW=branch-pr ;; esac
+    # Reject anything that is not a plausible branch name.
+    case "$BASE_BRANCH" in ''|*[!A-Za-z0-9._/-]*) BASE_BRANCH="" ;; esac
+fi
+WORKFLOW=${WORKFLOW:-branch-pr}
 if [ "${WORKFLOW:-branch-pr}" != "trunk" ]; then
     if [ -z "${BASE_BRANCH:-}" ]; then
         BASE_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')
         BASE_BRANCH=${BASE_BRANCH:-main}
     fi
-    # VDGG_BRANCH: agent fills in based on the agreed Step 0 Goal.
-    VDGG_BRANCH="<type>/<kebab-case-slug>"
-    git checkout -b "$VDGG_BRANCH"
+    CUR=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+    # Stay on the current branch if it's already a non-base feature branch
+    # (e.g. continuing or bundling another task onto the same branch).
+    if [ "$CUR" = "$BASE_BRANCH" ]; then
+        # On base branch -> create a new feature branch. The agent MUST pick
+        # the {type}/{slug} name from the Step 0 Goal; this snippet does not
+        # auto-generate one. Do NOT use `vibesdegogo/` as a prefix — that
+        # names the workflow, not the change, and is useless to anyone
+        # reading the PR list.
+        echo "vdgg: on base branch ($BASE_BRANCH). Run:" >&2
+        echo "  git checkout -b <type>/<kebab-slug-derived-from-Step-0-Goal>" >&2
+        echo "Types: feat | fix | refactor | docs | test | chore" >&2
+    fi
 fi
 ```
 
-Nesting is allowed: if the current branch is already a feature branch, a new `{type}/{slug}` branch is still created on top of it. The Step 1 block runs once per session because `vdgg_state_init` refuses a second initialization.
+If the current branch is already a feature branch, stay on it when this session continues or bundles work onto that change; create a new nested `{type}/{slug}` branch only when the session starts a genuinely separate change. The Step 1 block runs once per session because `vdgg_state_init` refuses a second initialization.
 
 Then output the Step 1 declaration from `references/output_formats.md`.
 
@@ -214,7 +370,12 @@ Investigation rules:
 
 - Do not guess. Read actual code.
 - Do not stop at a single file. Trace callers and impact.
-- Consider recent git history, lessons, and project notes when relevant.
+- Consider recent git history and project notes when relevant.
+- Read lessons from recent sessions and record the applicable ones in `investigation.md` under a `## 8. Lessons applied` heading (write `none applicable` when nothing fits):
+
+  ```bash
+  for f in $(find tasks/vdgg -name lessons.md -exec ls -t {} + 2>/dev/null | head -20); do echo "--- $f ---"; cat "$f"; done
+  ```
 - Mark unknowns explicitly.
 
 Then advance:
@@ -225,6 +386,8 @@ vdgg_state_advance 3 investigating
 ```
 
 Use subagents only when parallel investigation clearly helps.
+
+When a Formation is selected and `vdgg_formation_resolve STEP_3_AI` returns a non-`inline` AI, output the Delegate line, write the investigation prompt (see `references/subagent_prompts.md`) with filled-in paths as the input artifact, and call `vdgg_executor_run STEP_3_AI <input-file> tasks/vdgg/{id}/investigation.md`. Validate the required headings on the output before advancing. When no Formation is selected but `.vdgg-target` sets `STEP3_EXECUTOR_COMMAND`, use that legacy path instead.
 
 ## Step 4: Planning
 
@@ -243,15 +406,19 @@ Then advance:
 vdgg_state_advance 4 planning
 ```
 
+When a Formation is selected and `vdgg_formation_resolve STEP_4_AI` returns a non-`inline` AI, output the Delegate line, write the planning prompt with filled-in paths as the input artifact, and call `vdgg_executor_run STEP_4_AI <input-file> tasks/vdgg/{id}/todo.md`. Validate the output before advancing (both `todo.md` and `progress.md` must exist). When no Formation is selected but `.vdgg-target` sets `STEP4_EXECUTOR_COMMAND`, use that legacy path instead.
+
 ## Step 5: Select One Task
 
-Choose one task from `todo.md` and record it in state:
+Choose one task from `todo.md` — or, during a followup sweep, the next pending `TF` task from the queue in `progress.md`. The task must be small enough to complete implementation, tests, and verification in one Step 6 to Step 8 loop; split it before Step 6 if it is not. Declare an allowlist of every implementation/test/documentation file this task is allowed to change; keep it narrow and task-specific. Task notes under `tasks/vdgg/{id}/` never need allowlisting. If the task changes an interface, enum, type, or signature, also include the test file(s) that assert it in the allowlist, so a needed test update does not hit the re-arm wall mid-task.
 
 ```bash
 # [VibesDeGoGo! Step 5 Start] step=5, phase=task-selected, loop=0
 vdgg_state_advance 5 task-selected
-vdgg_state_write 5 task-selected <loop_count> "T1: title"
+vdgg_task_begin "T1: title" path/to/file1 path/to/file2
 ```
+
+`vdgg_task_begin` records the task in state, snapshots a baseline of the allowlisted files, and arms the task gate. The hook blocks implementation edits until it has run.
 
 ## Step 6: Implement
 
@@ -262,15 +429,20 @@ Implement the selected task and write tests where appropriate.
 vdgg_state_advance 6 implementing
 ```
 
-Do not run tests in `implementing`; the hook blocks test commands until Step 7.
+Do not run tests in `implementing`; the hook blocks test commands until Step 7. Edit/Write outside the task allowlist is blocked. `vdgg_task_begin` can only (re)arm at Step 5 — the state machine rejects it from `implementing`/`reflection` (6 -> 5 is not a legal transition). If the scope legitimately grew mid-task, either narrow the change to fit the current allowlist, or finish this task through Step 8 and select the extra scope as a new task at Step 5 (8 -> 5) with the right allowlist.
+
+When a Formation is selected and `vdgg_formation_resolve STEP_6_AI` returns a non-`inline` AI, output the Delegate line, write the implementation prompt (see `references/subagent_prompts.md`) with filled-in paths and the current task's allowlist as the input artifact, and call `vdgg_executor_run STEP_6_AI <input-file>`. The executor edits files in the working tree; the task allowlist and `vdgg_task_gate` still apply, so out-of-allowlist edits are caught at Step 7. When no Formation is selected, `STEP6_EXECUTOR_TIERS` (if set) governs Step 6 — see "Step 6 Executor Tiers (no Formation)" above; otherwise Step 6 runs inline.
 
 ## Step 7: Verify
 
-Before running verification, state 1 to 3 concrete checks. Then run tests, builds, smoke checks, or manual checks as appropriate.
+Before running verification, state the concrete checks you will run. Scale the count to the change's surface — roughly 1 to 3 for a small, localized change, more when it spans multiple files or touches a contract; do not stop at three if the surface is larger. At least one check must be one that would FAIL if the change were wrong — a boundary, error, or regression case, not only a happy-path confirmation. Then run them through the task gate, which re-checks the allowlist and records a pass only when the command succeeds. Pass the command as separate shell words, for example `vdgg_task_gate npm test`, or use `vdgg_task_gate bash -lc 'set -o pipefail; command with pipes'`.
+
+A verification command with a pipe that omits `set -o pipefail` can hide a failure in an earlier pipeline stage behind a successful final stage, so the gate records a false pass.
 
 ```bash
 # [VibesDeGoGo! Step 7 Start] step=7, phase=testing, loop=0
 vdgg_state_advance 7 testing
+vdgg_task_gate <verification-command> [args...]
 ```
 
 After all checks pass, run the `simplify` skill as a quality gate. The PostToolUse hook records a sentinel file:
@@ -285,7 +457,54 @@ Outcomes:
 - `modified=0`: verified transition is allowed.
 - `modified=1`: verified transition is blocked; go through reflection and re-test.
 
-For environments that cannot use the `simplify` skill, the state helper also exposes `vdgg_state_mark_reviewed` as an explicit review marker. It is an auxiliary compatibility hook, not a replacement for the Claude Code simplify gate when that gate is available.
+When a task allowlist is active, `vdgg_state_advance 7 verified` is also blocked until `vdgg_task_gate` has passed for the current loop. If verification fails and the work must be redone from the baseline, `vdgg_task_rollback` reverts the allowlisted changes.
+
+For environments that cannot use the `simplify` skill, or when `.vdgg-target` configures an external reviewer, run the review through `vdgg_review_run`:
+
+```bash
+vdgg_review_run                      # runs REVIEW_COMMAND from .vdgg-target
+vdgg_review_run <command> [args...]  # runs an explicit review command
+```
+
+When a Formation is selected and `vdgg_formation_resolve STEP_7_AI` returns a non-`inline` AI, output the Delegate line, write the review prompt with the working-tree diff and verification results as the input artifact, and call `vdgg_executor_run STEP_7_AI <input-file> <findings-output>`. The Formation review is read-only (findings only, no edits); apply the same severity-based response below, then record the gate with `vdgg_state_mark_reviewed` on pass. When no Formation is selected, use `simplify` or `vdgg_review_run` as above.
+
+It writes the review sentinel only when the command exits 0. A purely manual review can still be recorded with `vdgg_state_mark_reviewed`. The verified gate accepts either sentinel — simplify or explicit review — and both are subject to the same rule: implementation edits after the review flip `modified=1` and route through reflection. Prefer the simplify skill when it is available; prefer a different vendor than the implementing model for external review. For code that ships to other machines or handles user data, the review prompt must include a security perspective (injection, secrets exposure, unsafe file/network/exec operations) — simplify does not cover security. Sentinel files cannot be written directly; the hooks block Edit/Write/Bash writes to `.claude/.vdgg-*` paths.
+
+For a **subjective artifact** (docs, copy, naming, design — where quality is a judgment, not something a test can decide), the review gate can be the `MAGI` skill when it is installed: run MAGI as the review and record the gate with `vdgg_state_mark_reviewed` only when MAGI passes. If MAGI is not installed, skip it and use the standard `simplify`/review gate above. MAGI judges desirability, not code correctness — correctness still rides on tests and `simplify`.
+
+### simplify subagent consolidation
+
+The simplify skill's default Phase 1 (5 parallel angle finders, up to 8 candidates each) is the right call when ANY of these hold:
+
+- This is the FIRST simplify round (`loop_count=0`) on this feature.
+- The diff is large (>500 LOC), spans multiple files/layers, or touches contracts (API, persistence, concurrency, auth, security).
+- An unresolved high or medium finding from the previous round still applies to code being changed in this round (recall still matters there).
+
+You MAY collapse the 5 angles into ONE comprehensive agent (or do the review inline without a subagent) when ALL of these hold:
+
+- This is a follow-up round (`loop_count` ≥ 1).
+- No unresolved high or medium finding from the previous round still applies to code being changed in this round.
+- The diff in this round is small (≤200 LOC) AND localized (1–2 files, 1–2 functions).
+- No concurrency, pasteboard, pointer, lifecycle, or contract surface is touched.
+
+When collapsing, state the reason in the user-facing text (e.g. "collapsing to 1 agent because loop=3 and no unresolved high/medium finding touches this round's diff"). Do not collapse silently to save tokens or time.
+
+### simplify findings: severity-based response
+
+After simplify returns findings, classify each one and decide before editing:
+
+- **high**: correctness bug, data loss, race condition, security, contract regression.
+- **medium**: real bug with a narrow trigger, or a design that will break under reasonable use.
+- **low**: cosmetic, stale doc, log message wording, naming, dead branch, style.
+
+Response:
+
+- Any **high or medium** finding → fix it in implementation files. The sentinel will flip to `modified=1`, routing you through reflection — this is correct.
+- **All findings are low (or `[]`)** → DO NOT edit implementation files. Append the findings to `tasks/vdgg/{id}/followup.md` — or, inside a `TF` followup task, to `followup-final.md` — and advance directly to `verified`. Low items are collected by the Step 8 followup sweep.
+
+This stops convergence-loops on cosmetic findings while keeping the hook discipline intact: any implementation edit during testing still flips `modified=1`, so there is no escape hatch for high/medium.
+
+When listing findings, always assign an explicit `severity` field per finding so the classification is auditable. If simplify's own output omits severity, classify each finding yourself before deciding the response.
 
 After successful verification and simplify review:
 
@@ -305,9 +524,11 @@ vdgg_state_advance 6 reflection
 
 Reflection is mandatory after failed verification or simplify changes.
 
-At the beginning of reflection, start a researcher subagent for root-cause investigation unless self-maintenance mode explicitly allows skipping it for a mechanical typo/path issue.
+At the beginning of reflection, start a researcher subagent for root-cause investigation unless self-maintenance mode explicitly allows skipping it for a mechanical typo/path issue. When a Formation is selected and `vdgg_formation_resolve STEP_6R_AI` returns a non-`inline` AI, delegate this reflection pass to that executor via `vdgg_executor_run STEP_6R_AI <input-file> tasks/vdgg/{id}/investigation-r{loop_count}.md`.
 
-The researcher must write:
+Lightweight branch: when reflection was triggered by review/simplify findings rather than a test failure, skip the researcher subagent — write `investigation-r{loop_count}.md` directly from the review findings (classify each finding, then state the one fix) instead. A test-failure-triggered reflection still requires the researcher subagent as above. Either way, `investigation-r{loop_count}.md` and `progress.md` must still be written; the hook checks apply the same regardless of which path produced them.
+
+The researcher (or, on the lightweight branch, the agent itself) must write:
 
 ```text
 tasks/vdgg/{id}/investigation-r{loop_count}.md
@@ -337,6 +558,16 @@ vdgg_state_loop 6 implementing
 
 The hook checks that `progress.md` and `investigation-r{loop_count}.md` were updated during reflection.
 
+Right after returning to `implementing`, distill any reusable lesson from this reflection into `tasks/vdgg/{id}/lessons.md` — one entry per lesson: symptom → wrong assumption → correct move. Before writing, re-run the Step 3 lessons command and skip duplicates; write nothing when the failure was one-off (lessons are deliberately failure-derived — clean-pass insights are out of scope). After writing an entry, output one line in the user-facing text so the user can veto it on the spot, while the phase still allows deleting the entry:
+
+```text
+[VibesDeGoGo! Lesson] <one-line summary>
+```
+
+(The reflection phase itself cannot write this file; the hook allows only `progress.md` and `investigation-r*.md` there.)
+
+If the revised hypothesis needs files outside the current allowlist, do not try to widen the allowlist in place — `vdgg_task_begin` cannot re-arm outside Step 5 and will fail loudly. Adapt the fix to the current allowlist (e.g. downgrade an optional cleanup to a followup note), or complete/close this task and take the wider scope as a new task via Step 8 -> Step 5. The task gate must pass again for the new loop before `verified`.
+
 ## Step 8: Progress And Validation Request
 
 Advance:
@@ -353,7 +584,19 @@ Ask the user for validation according to `DEPLOY_COMMAND`, `DEPLOY_TARGET`, and 
 Update `progress.md` and check whether all tasks are complete:
 
 - unfinished tasks: go back to Step 5,
-- all tasks complete: continue to Step 9.
+- all planned tasks complete: run the followup sweep below, then continue to Step 9.
+
+### Followup sweep (low findings)
+
+On the FIRST Step 8 entry after all planned tasks are complete, build the sweep queue exactly once: read `tasks/vdgg/{id}/followup.md`; if it is empty or absent, continue to Step 9. Otherwise group its items into followup tasks using the Step 4 task-sizing rules, name them with a `TF` prefix (`TF1: ...`, `TF2: ...`), and record the queue in `progress.md` with a status per task (pending / fixed / residue).
+
+Then return to Step 5 (8 -> 5) for the next pending `TF` task, so every fix runs through the normal allowlist, task gate, and review gate, and lands in the same branch and PR as the planned work. Later Step 8 entries during the sweep do NOT re-read `followup.md`; they update the queue statuses in `progress.md` and pick 8 -> 5 while pending `TF` tasks remain, Step 9 when none do. During the sweep, skip the per-task validation ask above — request validation once, before Step 9.
+
+Sweep rules:
+
+- A `TF` task's Step 7 review may use the collapsed single-agent simplify path regardless of `loop_count`: its scope was already screened and classified by a planned task's review.
+- New low findings discovered inside a `TF` task go to `followup-final.md` (append, never overwrite) and are NOT queued — list them in the completion report as residue.
+- An item judged unsafe or out of scope to fix is marked `residue` in the queue with the reason and listed in the completion report.
 
 ## Step 9: Commit
 
@@ -397,7 +640,7 @@ After PR creation or trunk commit/push decision:
 vdgg_state_clear
 ```
 
-Then provide a friendly completion report: what finished, what was verified, what the user needs to do next, build/version numbers if any, and short technical details.
+Then provide a friendly completion report: what finished, what was verified, what the user needs to do next, build/version numbers if any, short technical details, any residual low findings from the followup sweep (with the reason each was left), and a lessons line (`lessons applied: N / new: M`).
 
 ## Stop Conditions
 
@@ -423,5 +666,5 @@ When stopping intentionally, include `[Intentional Stop]` in assistant text and 
 - [ ] Step 6: implement.
 - [ ] Step 7: verify, run simplify, and only then mark verified.
 - [ ] Step 6-R: if needed, investigate failure, record one hypothesis, and retry.
-- [ ] Step 8: update progress/version and request validation.
+- [ ] Step 8: update progress/version, run the followup sweep for remaining low findings, and request validation.
 - [ ] Step 9: commit, push/PR according to workflow, clear state, and report.

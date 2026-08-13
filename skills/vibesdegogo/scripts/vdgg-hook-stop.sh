@@ -82,5 +82,5 @@ if echo "$CURRENT_TURN_TEXT" | grep -qF "[Intentional Stop]"; then
 fi
 
 # Otherwise block silent stop while the workflow is active.
-echo "VibesDeGoGo! [${VDGG_ID}] step=${STEP} phase=${PHASE}: Active workflow cannot stop silently. Run the next state action or output [Intentional Stop] with a reason." >&2
+echo "VibesDeGoGo! [${VDGG_ID}] step=${STEP} phase=${PHASE}: Active workflow cannot stop silently. If you are waiting on a background subagent, that is a legitimate reason to pause — say so with [Intentional Stop]. Otherwise run the next state action." >&2
 exit 2
