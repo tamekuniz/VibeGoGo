@@ -684,10 +684,10 @@ vdgg_state_loop() {
   vdgg_state_write "$loop_step" "$loop_phase" "$(( ${current_loop:-0} + 1 ))" "$current_task"
 }
 
-vdgg_state_mark_reviewed() {
+_vdgg_write_review_sentinel() {
   local state_file id loop review_file
   state_file=$(_vdgg_get_state_file)
-  [ -f "$state_file" ] || { echo "vdgg_state_mark_reviewed: state file not found" >&2; return 1; }
+  [ -f "$state_file" ] || { echo "_vdgg_write_review_sentinel: state file not found" >&2; return 1; }
   id=$(_vdgg_get_active_id)
   loop=$(grep '^loop_count=' "$state_file" | cut -d= -f2)
   review_file=$(_vdgg_review_file_for_id "$id" "${loop:-0}")
@@ -718,7 +718,7 @@ vdgg_review_run() {
     fi
     bash -c "$review_command" || return $?
   fi
-  vdgg_state_mark_reviewed
+  _vdgg_write_review_sentinel
 }
 
 vdgg_task_begin() {

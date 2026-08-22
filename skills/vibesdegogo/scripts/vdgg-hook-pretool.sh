@@ -270,6 +270,15 @@ if [ "$TOOL_NAME" = "Edit" ] || [ "$TOOL_NAME" = "Write" ]; then
     fi
 fi
 if [ "$TOOL_NAME" = "Bash" ]; then
+    # The review sentinel writer is internal to vdgg_review_run. Calling it
+    # directly records a review that never ran, which is the one thing the Step 7
+    # gate exists to prevent, and it leaves no sidecar path in the command for
+    # the guard below to catch. Same literal-match limit: a name hidden behind a
+    # shell variable evades this.
+    if echo "$COMMAND" | grep -q '_vdgg_write_review_sentinel'; then
+        echo "VibesDeGoGo! [${VDGG_ID:-unknown}]: The review gate is recorded by vdgg_review_run, which runs a review command and writes the sentinel only when it exits 0. Calling the internal sentinel writer directly is not allowed." >&2
+        exit 2
+    fi
     # Sidecar files (.claude/.vdgg-*) may only be written through vdgg_state_*
     # helpers, never directly, or the review/gate sentinels could be forged.
     # Check each shell segment independently so a `git commit` segment (whose
@@ -289,8 +298,13 @@ if [ "$TOOL_NAME" = "Bash" ]; then
     _vdgg_segs="${_vdgg_segs//;/$'\n'}"
     _vdgg_segs="${_vdgg_segs//|/$'\n'}"
     while IFS= read -r _vdgg_seg; do
+        # The bare `.vdgg-` basename is matched as well as the directory-prefixed
+        # form: `cd .claude && printf ... > .vdgg-review-sentinel-...` writes the
+        # same file without the prefix ever appearing in the command. This does
+        # widen the match to any path containing `.vdgg-`, which is rare enough
+        # in practice to be worth the forged-sentinel case it closes.
         case "$_vdgg_seg" in
-            *".claude/.vdgg-"*|*".vdgg-target"*) ;;
+            *".claude/.vdgg-"*|*".vdgg-target"*|*".vdgg-"*) ;;
             *) continue ;;
         esac
         if echo "$_vdgg_seg" | grep -qE '(^|[^a-zA-Z0-9_-])git[[:space:]]+commit($|[[:space:]])'; then
@@ -457,7 +471,7 @@ case "$PHASE" in
                 exit 2
             fi
             # verified requires a review gate: either the simplify sentinel or the
-            # explicit review sentinel (vdgg_state_mark_reviewed / vdgg_review_run),
+            # explicit review sentinel written by vdgg_review_run,
             # and the review must not have edited implementation code.
             if [ "$PHASE" = "testing" ] && echo "$COMMAND" | grep -qE 'vdgg_state_(advance|loop|write)[[:space:]]+[0-9]+[[:space:]]+verified'; then
                 # When a task allowlist is active, the task gate must have passed.

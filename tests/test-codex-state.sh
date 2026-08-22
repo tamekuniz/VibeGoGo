@@ -85,8 +85,13 @@ LOOP_COUNT=$(grep '^loop_count=' ".codex/.vdgg-state-${ID}" | cut -d= -f2)
 assert_eq "1" "$LOOP_COUNT" "Codex vdgg_state_loop increments loop_count"
 
 vdgg_state_advance 7 testing >/tmp/vdgg-test-codex-7.out 2>/tmp/vdgg-test-codex-7.err
-vdgg_state_mark_reviewed >/tmp/vdgg-test-codex-review.out 2>/tmp/vdgg-test-codex-review.err
-assert_file_exists ".codex/.vdgg-review-sentinel-${ID}-1" "Codex mark_reviewed creates review sentinel"
+# The manual review marker is gone in the Codex edition too. This file does not
+# use `set -e`, so the probe runs bare.
+type vdgg_state_mark_reviewed >/dev/null 2>&1
+STATUS=$?
+assert_ne "0" "$STATUS" "Codex vdgg_state_mark_reviewed is no longer a public helper"
+vdgg_review_run true >/tmp/vdgg-test-codex-review.out 2>/tmp/vdgg-test-codex-review.err
+assert_file_exists ".codex/.vdgg-review-sentinel-${ID}-1" "Codex review_run creates review sentinel"
 MODIFIED=$(grep '^modified=' ".codex/.vdgg-review-sentinel-${ID}-1" | cut -d= -f2)
 assert_eq "0" "$MODIFIED" "Codex review sentinel starts with modified=0"
 

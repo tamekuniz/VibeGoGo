@@ -104,7 +104,7 @@ Executor `COMMAND=` lines can then call `vdgg-llm-start <id>` through a wrapper 
 - Prefer global hooks in `~/.codex/hooks.json` or `~/.codex/config.toml` so VDGG rules apply across repositories. Repo-local `.codex/hooks.json` is optional and only covers that repository after trust.
 - Hook commands should call the installed skill path, normally `$HOME/.agents/skills/vibesdegogo`, or set `VDGG_CODEX_SKILL_DIR` to an absolute skill directory. Do not assume the target project contains `.agents/skills/vibesdegogo`.
 - Codex hook coverage is a guardrail, not a complete enforcement boundary. When unsure, stop before risky work.
-- Codex does not have the exact Claude Code `simplify` gate. Use the Codex review gate in this skill instead: after verification, run a focused simplification/review pass yourself, record it with `vdgg_state_mark_reviewed`, then advance to `verified`.
+- Codex does not have the exact Claude Code `simplify` gate. Use the Codex review gate in this skill instead: after verification, run the review through `vdgg_review_run` so the gate is recorded only when the review command succeeds, then advance to `verified`.
 - After a failed Bash command, the next command you issue must contain `[Error Acknowledged]` in its text before anything else runs (the pretool error gate). If the hook blocks you, include that marker in your next command text to clear the gate before continuing.
 - Each implementation loop must use a task allowlist and task gate: `vdgg_task_begin` records the allowed files and baseline, `vdgg_task_gate` must pass before `verified`, and `vdgg_task_rollback` reverts the current task when the gate fails.
 
@@ -388,17 +388,17 @@ After checks pass, do a focused simplification/review pass:
 - confirm no constraints were violated,
 - record the review in `progress.md`.
 
-Then mark the Codex review gate:
+Then mark the Codex review gate. The gate is recorded by running the review through `vdgg_review_run`, which writes the sentinel only when the review command exits 0. There is no separate marker to call.
 
 ```bash
 VDGG_REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 VDGG_CODEX_SKILL_DIR="${VDGG_CODEX_SKILL_DIR:-$HOME/.agents/skills/vibesdegogo}"
 [ -f "$VDGG_CODEX_SKILL_DIR/scripts/vdgg-state.sh" ] || VDGG_CODEX_SKILL_DIR="$VDGG_REPO_ROOT/.agents/skills/vibesdegogo"
 source "$VDGG_CODEX_SKILL_DIR/scripts/vdgg-state.sh"
-vdgg_state_mark_reviewed
+vdgg_review_run codex exec --sandbox read-only 'review the diff; exit 1 on blocking findings'
 ```
 
-Alternatively, use `vdgg_review_run` to run a dedicated external review command and mark the gate in one step. It runs `REVIEW_COMMAND` from `.vdgg-target` (or an explicit command) and writes the review sentinel only when the command exits 0; a non-zero exit propagates without writing the sentinel. Prefer a different vendor than the implementing model for the reviewer. The reviewer must be read-only: findings only, no edits. For code that ships to other machines or handles user data, the review prompt must include a security perspective (injection, secrets exposure, unsafe file/network/exec operations) — the simplify gate does not cover security.
+`vdgg_review_run` runs `REVIEW_COMMAND` from `.vdgg-target` (or an explicit command) and writes the review sentinel only when the command exits 0; a non-zero exit propagates without writing the sentinel. Prefer a different vendor than the implementing model for the reviewer. The reviewer must be read-only: findings only, no edits. For code that ships to other machines or handles user data, the review prompt must include a security perspective (injection, secrets exposure, unsafe file/network/exec operations) — the simplify gate does not cover security.
 
 ```bash
 # With an explicit command:
@@ -408,7 +408,7 @@ vdgg_review_run codex exec --sandbox read-only 'review the diff; exit 1 on block
 vdgg_review_run
 ```
 
-For a **subjective artifact** (docs, copy, naming, design — where quality is a judgment, not something a test can decide), this review pass can be the `MAGI` skill when it is installed: run MAGI as the review and `vdgg_state_mark_reviewed` only when MAGI passes. If MAGI is not installed, do the focused review yourself as above. MAGI judges desirability, not code correctness — correctness still rides on tests and your review.
+For a **subjective artifact** (docs, copy, naming, design — where quality is a judgment, not something a test can decide), this review pass can be the `MAGI` skill when it is installed: run MAGI as the review, write its verdict line to `tasks/vdgg/{id}/magi-verdict.md`, and record the gate with `vdgg_review_run grep -q '^MAGI判定: 可決' tasks/vdgg/{id}/magi-verdict.md`. If MAGI is not installed, do the focused review yourself as above. MAGI judges desirability, not code correctness — correctness still rides on tests and your review.
 
 Relevant `.vdgg-target` keys for Step 7 and legacy step delegation when no Formation is selected:
 
@@ -455,7 +455,7 @@ source "$VDGG_CODEX_SKILL_DIR/scripts/vdgg-state.sh"
 vdgg_state_advance 7 verified
 ```
 
-The pretool hook blocks `verified` until both `vdgg_task_gate` and `vdgg_state_mark_reviewed` have succeeded.
+The pretool hook blocks `verified` until both `vdgg_task_gate` and `vdgg_review_run` have succeeded.
 
 If verification fails, run `vdgg_task_rollback`, go to reflection, select exactly one revised hypothesis, and retry. If review changes implementation files, go to reflection and retest. If `vdgg_task_rollback` refuses because files outside the allowlist changed, resolve those manually (`git status` + `git checkout -- <file>`) and rerun it.
 

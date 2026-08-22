@@ -163,7 +163,7 @@ if echo "$COMMAND" | grep -qE "$SEARCH_CMDS_PATTERN"; then
 fi
 
 # Internal state-helper commands are workflow operations, not user command failures.
-if echo "$COMMAND" | grep -qE 'vdgg_state_(init|write|advance|loop|clear|read)'; then
+if echo "$COMMAND" | grep -qE 'vdgg_state_(init|write|advance|loop|clear|read)|vdgg_review_run'; then
     exit 0
 fi
 

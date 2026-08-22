@@ -9,6 +9,20 @@ grouped by edition. Their histories are merged into this repository.
 
 ## [Unreleased]
 
+### Removed
+
+- **Breaking:** `vdgg_state_mark_reviewed` is no longer a public helper in either
+  edition. It wrote the Step 7 review sentinel without requiring that any review
+  had run, so the gate could be opened with a single command. The review sentinel
+  is now written through `vdgg_review_run`, which runs a review command and
+  records the gate only when that command exits 0. The hooks in both editions
+  block direct calls to the internal sentinel writer, and now also catch a
+  sentinel written by relative path after a `cd` into the sidecar directory. Sessions that recorded the
+  gate manually must switch to `vdgg_review_run <command>`, or set
+  `REVIEW_COMMAND` in `.vdgg-target` and call `vdgg_review_run` with no
+  arguments. The MAGI review gate for subjective artifacts now runs through
+  `vdgg_review_run` as well, checking the verdict line it wrote.
+
 ### Changed
 
 - The two editions are reunited in a single repository. `VibesDeGoGo-for-Claude-Code`

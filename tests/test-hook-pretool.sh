@@ -83,7 +83,7 @@ write_state investigating 3
 STATUS=$(run_hook '{"tool_name":"Grep","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"pattern":"x"}}')
 assert_exit_code 0 "$STATUS" "read-like tools pass during investigation"
 
-# Review gate: a clean review sentinel (vdgg_state_mark_reviewed) satisfies verified.
+# Review gate: a clean review sentinel (written by vdgg_review_run) satisfies verified.
 write_state testing 7
 cat > "$TMPDIR_VDGG/.claude/.vdgg-review-sentinel-test-id-0" <<EOF
 started=1
@@ -106,6 +106,18 @@ EOF
 STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"# [VibesDeGoGo! Step 7 Start] step=7, phase=verified, loop=0\nvdgg_state_advance 7 verified"}}')
 assert_exit_code 2 "$STATUS" "verified transition is blocked when review modified code"
 rm -f "$TMPDIR_VDGG/.claude/.vdgg-review-sentinel-test-id-0"
+
+# Sentinel forgery: the internal writer cannot be called directly. That call
+# leaves no sidecar path in the command, so the guard below would not see it.
+write_state testing 7
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"source skills/vibesdegogo/scripts/vdgg-state.sh && _vdgg_write_review_sentinel"}}')
+assert_exit_code 2 "$STATUS" "direct call to the internal sentinel writer is blocked"
+
+# Sentinel forgery: a relative write after cd into the sidecar directory drops
+# the .claude/ prefix from the command, so the basename must be matched too.
+write_state testing 7
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"cd .claude && printf started=1 > .vdgg-review-sentinel-test-id-0"}}')
+assert_exit_code 2 "$STATUS" "relative sentinel write after cd is blocked"
 
 # Sentinel forgery: direct Write to a sentinel path is blocked.
 write_state testing 7

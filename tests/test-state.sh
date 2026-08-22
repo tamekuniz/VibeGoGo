@@ -35,8 +35,15 @@ LOOP_COUNT=$(grep '^loop_count=' ".claude/.vdgg-state-${ID}" | cut -d= -f2)
 assert_eq "1" "$LOOP_COUNT" "vdgg_state_loop increments loop_count"
 
 vdgg_state_advance 7 testing >/tmp/vdgg-test-state-7.out 2>/tmp/vdgg-test-state-7.err
-vdgg_state_mark_reviewed >/tmp/vdgg-test-state-review.out 2>/tmp/vdgg-test-state-review.err
-assert_file_exists ".claude/.vdgg-review-sentinel-${ID}-1" "mark_reviewed creates review sentinel"
+# The manual review marker is gone. The only way to write a review sentinel is
+# vdgg_review_run, which requires a review command that actually exits 0.
+set +e
+type vdgg_state_mark_reviewed >/dev/null 2>&1
+STATUS=$?
+set -e
+assert_ne "0" "$STATUS" "vdgg_state_mark_reviewed is no longer a public helper"
+vdgg_review_run true >/tmp/vdgg-test-state-review.out 2>/tmp/vdgg-test-state-review.err
+assert_file_exists ".claude/.vdgg-review-sentinel-${ID}-1" "review_run creates review sentinel"
 MODIFIED=$(grep '^modified=' ".claude/.vdgg-review-sentinel-${ID}-1" | cut -d= -f2)
 assert_eq "0" "$MODIFIED" "review sentinel records modified=0"
 

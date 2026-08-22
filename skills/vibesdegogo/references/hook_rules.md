@@ -112,7 +112,7 @@ Two sentinels can satisfy the gate:
 
 ```text
 .claude/.vdgg-simplify-sentinel-{vdgg_id}-{loop_count}   created by PostToolUse when the simplify skill runs
-.claude/.vdgg-review-sentinel-{vdgg_id}-{loop_count}     created by vdgg_state_mark_reviewed / vdgg_review_run
+.claude/.vdgg-review-sentinel-{vdgg_id}-{loop_count}     created by vdgg_review_run when the review command exits 0
 ```
 
 Fields (both sentinels):

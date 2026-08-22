@@ -94,7 +94,7 @@ RESP_TEXT=$(printf '%s' "$INPUT" | jq -r 'if (.tool_response|type)=="object" the
 # normal command output is not treated as an error. Empty for string/null shapes.
 STDOUT_TEXT=$(printf '%s' "$INPUT" | jq -r 'if (.tool_response|type)=="object" then (.tool_response.stdout//"") else "" end' 2>/dev/null || true)
 
-if printf '%s' "$COMMAND" | grep -qE 'vdgg_state_(init|write|advance|loop|clear|read|mark_reviewed)'; then
+if printf '%s' "$COMMAND" | grep -qE 'vdgg_state_(init|write|advance|loop|clear|read)|vdgg_review_run'; then
   exit 0
 fi
 
