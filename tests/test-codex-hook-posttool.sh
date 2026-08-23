@@ -42,6 +42,16 @@ STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"c
 assert_exit_code 0 "$STATUS" "grep no-match exits cleanly"
 assert_file_not_exists "$TMPDIR_VDGG/.codex/.vdgg-error-pending" "grep exit 1 does not create error flag"
 
+# A review that reports blocking findings exits non-zero, and that is a verdict,
+# not a tool failure to acknowledge. The command here must not be a search: the
+# older IS_SEARCH exemption would absorb it and this case would pass even with
+# the vdgg_review_run exemption removed.
+rm -f "$TMPDIR_VDGG/.codex/.vdgg-error-pending"
+write_state testing 7
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"vdgg_review_run codex exec review-prompt"},"tool_response":{"exit_code":1,"stderr":"review found blocking issues"}}')
+assert_exit_code 0 "$STATUS" "Codex posttool exits cleanly after a failing review gate"
+assert_file_not_exists "$TMPDIR_VDGG/.codex/.vdgg-error-pending" "a failing vdgg_review_run does not create the error flag"
+
 # Codex CLI 0.139.0 delivers tool_response as a plain string, not an object.
 # The hook must not error out under set -e, and must still detect failure from
 # the response text (best-effort, since there is no exit_code in this form).
@@ -57,22 +67,13 @@ STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"c
 assert_exit_code 0 "$STATUS" "clean string tool_response exits cleanly"
 assert_file_not_exists "$TMPDIR_VDGG/.codex/.vdgg-error-pending" "clean string tool_response creates no error flag"
 
-# Regression: object shape, exit 0, stdout containing an error word mid-line
-# (e.g. `git log` output "a1b2c3 fix: error in parser") must NOT be misdetected.
-# stdout is checked with a strict start-of-line pattern, so normal output passes.
+# Object shape carries a real exit code, so response text is never sniffed:
+# exit 0 means success even when stdout/stderr mention an error word.
 rm -f "$TMPDIR_VDGG/.codex/.vdgg-error-pending"
 write_state implementing 6
-STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"git log --oneline"},"tool_response":{"exit_code":0,"stdout":"a1b2c3 fix: error in parser","stderr":""}}')
-assert_exit_code 0 "$STATUS" "object exit 0 with error word in stdout exits cleanly"
-assert_file_not_exists "$TMPDIR_VDGG/.codex/.vdgg-error-pending" "error word in normal stdout does not create error flag"
-
-# Regression: object shape, exit 0, stderr containing an error word must still
-# create the error flag (broad scan path over stderr stays alive).
-rm -f "$TMPDIR_VDGG/.codex/.vdgg-error-pending"
-write_state implementing 6
-STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"make build"},"tool_response":{"exit_code":0,"stdout":"","stderr":"Error: boom"}}')
-assert_exit_code 0 "$STATUS" "object exit 0 with error word in stderr exits cleanly"
-assert_file_exists "$TMPDIR_VDGG/.codex/.vdgg-error-pending" "error word in stderr still creates error flag"
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"make build"},"tool_response":{"exit_code":0,"stdout":"a1b2c3 fix: error in parser","stderr":"Error: boom"}}')
+assert_exit_code 0 "$STATUS" "object exit 0 with error words exits cleanly"
+assert_file_not_exists "$TMPDIR_VDGG/.codex/.vdgg-error-pending" "object exit 0 never creates an error flag from text"
 
 # Some Codex versions/events omit tool_response entirely. The hook must not error
 # out under set -e (jq type check falls to else), and must pass through cleanly.

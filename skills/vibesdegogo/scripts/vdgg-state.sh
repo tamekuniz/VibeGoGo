@@ -845,11 +845,11 @@ vdgg_state_loop() {
     vdgg_state_write "$loop_step" "$loop_phase" "$new_loop" "$current_task"
 }
 
-vdgg_state_mark_reviewed() {
+_vdgg_write_review_sentinel() {
     local state_file
     state_file=$(_vdgg_get_state_file)
     if [ -z "$state_file" ] || [ ! -f "$state_file" ]; then
-        echo "vdgg_state_mark_reviewed: state file not found" >&2
+        echo "_vdgg_write_review_sentinel: state file not found" >&2
         return 1
     fi
 
@@ -888,7 +888,7 @@ vdgg_review_run() {
         fi
         bash -c "$review_command" || return $?
     fi
-    vdgg_state_mark_reviewed
+    _vdgg_write_review_sentinel
 }
 
 # Begin one task: record its title, an allowlist of files it may change, and a

@@ -42,6 +42,16 @@ STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"c
 assert_exit_code 0 "$STATUS" "grep no-match exits cleanly"
 assert_file_not_exists "$TMPDIR_VDGG/.claude/.vdgg-error-pending" "grep exit 1 does not create error flag"
 
+# A review that reports blocking findings exits non-zero, and that is a verdict,
+# not a tool failure to acknowledge. The command here must not be a search: the
+# older IS_SEARCH exemption would absorb it and this case would pass even with
+# the vdgg_review_run exemption removed.
+rm -f "$TMPDIR_VDGG/.claude/.vdgg-error-pending"
+write_state testing 7
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"vdgg_review_run codex exec review-prompt"},"tool_response":{"exit_code":1,"stderr":"review found blocking issues"}}')
+assert_exit_code 0 "$STATUS" "posttool exits cleanly after a failing review gate"
+assert_file_not_exists "$TMPDIR_VDGG/.claude/.vdgg-error-pending" "a failing vdgg_review_run does not create the error flag"
+
 # Review sentinel: Edit during testing flips modified=1 on the review sentinel.
 write_state testing 7
 cat > "$TMPDIR_VDGG/.claude/.vdgg-review-sentinel-test-id-0" <<EOF

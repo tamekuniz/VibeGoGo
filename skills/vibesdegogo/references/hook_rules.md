@@ -22,25 +22,8 @@ output redirection or `tee`. Every other form — interpreters (`python`, `perl`
 This covers state files, the active marker, and the simplify/review sentinels —
 so the review gate cannot be satisfied by forging a sentinel. Use `vdgg_state_*`
 helpers instead. The same write protection also applies to `.vdgg-target`
-(reads stay allowed), so the agent cannot self-author `REVIEW_COMMAND` or a
-`STEP*_EXECUTOR_COMMAND` to forge a passing review or run an arbitrary command.
-
-Step declarations are validated for Bash commands that call:
-
-```text
-vdgg_state_advance
-vdgg_state_loop
-vdgg_state_write
-```
-
-The Bash command text must include the matching declaration:
-
-```bash
-# [VibesDeGoGo! Step 3 Start] step=3, phase=investigating, loop=0
-source "$VDGG_SKILL_DIR/scripts/vdgg-state.sh" && vdgg_state_advance 3 investigating
-```
-
-For Step 2, `[VibesDeGoGo! Declaration]` is also accepted because it follows Step 1 initialization.
+(reads stay allowed), so the agent cannot self-author `REVIEW_COMMAND` to forge
+a passing review.
 
 ## Phase Behavior
 
@@ -95,7 +78,8 @@ PostToolUse detects Bash failures and writes:
 .claude/.vdgg-error-pending
 ```
 
-Before the next tool call, PreToolUse requires assistant text containing:
+The next Bash command must contain the marker in its command text (e.g. in a
+leading comment), the same contract as the Codex edition:
 
 ```text
 [Error Acknowledged]
@@ -112,7 +96,7 @@ Two sentinels can satisfy the gate:
 
 ```text
 .claude/.vdgg-simplify-sentinel-{vdgg_id}-{loop_count}   created by PostToolUse when the simplify skill runs
-.claude/.vdgg-review-sentinel-{vdgg_id}-{loop_count}     created by vdgg_state_mark_reviewed / vdgg_review_run
+.claude/.vdgg-review-sentinel-{vdgg_id}-{loop_count}     created by vdgg_review_run when the review command exits 0
 ```
 
 Fields (both sentinels):

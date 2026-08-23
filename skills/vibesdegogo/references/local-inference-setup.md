@@ -34,7 +34,7 @@ Follow the steps in order. Every step ends in a checkable command.
    skill's `scripts/` directory:
 
    ```bash
-   sudo cp .agents/skills/vibesdegogo/scripts/vdgg-llm-start.sh \
+   sudo cp ~/.claude/skills/vibesdegogo/scripts/vdgg-llm-start.sh \
            /usr/local/bin/vdgg-llm-start
    sudo chmod +x /usr/local/bin/vdgg-llm-start
    ```
@@ -56,7 +56,7 @@ Follow the steps in order. Every step ends in a checkable command.
 4. **Copy the example `servers.conf` and edit the model paths and ports.**
 
    ```bash
-   cp .agents/skills/vibesdegogo/references/servers.conf.example \
+   cp ~/.claude/skills/vibesdegogo/references/servers.conf.example \
       ~/.config/vdgg/servers.conf
    ${EDITOR:-vi} ~/.config/vdgg/servers.conf
    ```
@@ -145,7 +145,7 @@ launchctl kickstart -k "gui/$(id -u)/com.YOUR_USER.vdgg.llama-qwen"
 
 ## Linux: systemd
 
-The launcher is POSIX sh and the `servers.conf` schema is identical across
+The launcher is bash and the `servers.conf` schema is identical across
 OSes; what follows is a schema-compatible unit template. If you use it,
 please open an issue confirming it works or noting what needed to change.
 

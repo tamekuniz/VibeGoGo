@@ -213,56 +213,25 @@ case "$TOOL_NAME" in
         ;;
 esac
 
-# Error acknowledgement gate: after a failed Bash command, require the next
-# assistant turn to acknowledge it before another tool runs.
+# Error acknowledgement gate: after a failed Bash command, the next Bash
+# command must contain [Error Acknowledged] in its text (e.g. in a leading
+# comment). Same contract as the Codex edition; no transcript parsing.
 ERROR_FLAG="$CWD/.claude/.vdgg-error-pending"
-if [ -f "$ERROR_FLAG" ]; then
-    TRANSCRIPT_PATH_E=$(echo "$INPUT" | jq -r '.transcript_path // empty')
-    if [ -n "$TRANSCRIPT_PATH_E" ] && [ -f "$TRANSCRIPT_PATH_E" ]; then
-        # Accept an acknowledgement emitted at any point after the failure was
-        # recorded, anchored on the flag file's mtime.
-        #
-        # Anchoring on "after the last user message" instead made this gate
-        # unsatisfiable in practice. The current assistant message is not yet in
-        # the transcript at PreToolUse time (see the Guard 2 note below), so the
-        # acknowledgement can never ride in the same message as the retry; and
-        # once the turn ends, ANY later user entry pushes the acknowledgement out
-        # of the window -- including the Stop hook's own feedback, which is
-        # recorded as a user entry. No ordering could satisfy it, so a single
-        # failed Bash command blocked every non-read tool for the rest of the
-        # session.
-        FLAG_MTIME_E=$(_vdgg_mtime "$ERROR_FLAG")
-        # Fractional seconds are stripped because jq's fromdateiso8601 accepts
-        # only whole-second ISO-8601; a parse failure would exclude every entry
-        # and recreate the trap.
-        TS_EXPR_E='((.timestamp // "") | sub("\\.[0-9]+";"") | fromdateiso8601? // 0)'
-        ACK_TEXT_E=$(jq -r --arg t "$FLAG_MTIME_E" "
-            select(.type==\"assistant\")
-            | select($TS_EXPR_E >= (\$t | tonumber))
-            | .message.content[]? | select(.type==\"text\") | .text // empty
-        " "$TRANSCRIPT_PATH_E" 2>/dev/null || true)
-        # If nothing in the transcript carries a parseable timestamp the mtime
-        # anchor cannot work at all; fall back to a bounded tail window so the
-        # gate degrades into something satisfiable rather than into a trap.
-        HAS_TS_E=$(jq -r "select(.type==\"assistant\") | $TS_EXPR_E | select(. > 0)" "$TRANSCRIPT_PATH_E" 2>/dev/null | head -1)
-        if [ -z "$HAS_TS_E" ]; then
-            ACK_TEXT_E=$(tail -n 40 "$TRANSCRIPT_PATH_E" | jq -r 'select(.type=="assistant") | .message.content[]? | select(.type=="text") | .text // empty' 2>/dev/null || true)
-        fi
-        if echo "$ACK_TEXT_E" | grep -qF "[Error Acknowledged]"; then
-            rm -f "$ERROR_FLAG"
-        else
-            ERROR_REASON=$(grep "^reason=" "$ERROR_FLAG" | cut -d= -f2- || echo "unknown")
-            echo "VibesDeGoGo! [${VDGG_ID}]: Previous Bash command failed ($ERROR_REASON). Output [Error Acknowledged] with a short plan before running another tool." >&2
-            exit 2
-        fi
+if [ "$TOOL_NAME" = "Bash" ] && [ -f "$ERROR_FLAG" ]; then
+    if echo "$COMMAND" | grep -qF '[Error Acknowledged]'; then
+        rm -f "$ERROR_FLAG"
+    else
+        ERROR_REASON=$(grep "^reason=" "$ERROR_FLAG" | cut -d= -f2- || echo "unknown")
+        echo "VibesDeGoGo! [${VDGG_ID}]: Previous Bash command failed ($ERROR_REASON). Include [Error Acknowledged] with a short plan in your next Bash command." >&2
+        exit 2
     fi
 fi
 
 # Guard 4: block direct edits to any .claude/.vdgg-* sidecar (state, active,
 # sentinels) and to .vdgg-target in all phases. Sentinel forgery would bypass
-# the review gate; and .vdgg-target holds trusted config (REVIEW_COMMAND,
-# STEP*_EXECUTOR_COMMAND) that is executed, so letting the agent write it would
-# let it self-author a passing review or an arbitrary command.
+# the review gate; and .vdgg-target holds trusted config (REVIEW_COMMAND) that
+# is executed, so letting the agent write it would let it self-author a passing
+# review.
 if [ "$TOOL_NAME" = "Edit" ] || [ "$TOOL_NAME" = "Write" ]; then
     if [[ "$FILE_PATH" == *".claude/.vdgg-"* ]] || [[ "$FILE_PATH" == *".vdgg-target" ]]; then
         echo "VibesDeGoGo! [${VDGG_ID}]: Direct edits to VibesDeGoGo! sidecar/target files are blocked. Use vdgg_state_* helpers; .vdgg-target must be set by a human." >&2
@@ -310,42 +279,6 @@ if [ "$TOOL_NAME" = "Bash" ]; then
             exit 2
         fi
     done <<< "$_vdgg_segs"
-fi
-
-# Guard 2: validate Step declarations in Bash state-transition commands.
-#
-# The hook checks tool_input.command instead of transcript text because the
-# current assistant message may not be in the transcript at PreToolUse time.
-# This prevents a valid first attempt from being falsely rejected, and prevents
-# a retry from bypassing the declaration check.
-#
-# Exception: Step 2 accepts the declaration banner emitted during initialization.
-#
-# Example:
-#   # [VibesDeGoGo! Step 3 Start] step=3, phase=investigating, loop=0
-#   source $HOME/.claude/skills/vibesdegogo/scripts/vdgg-state.sh && vdgg_state_advance 3 investigating
-#
-# Human-readable assistant text may still include the declaration, but the
-# enforceable contract is the command text.
-if [ "$TOOL_NAME" = "Bash" ] && echo "$COMMAND" | grep -qE 'vdgg_state_(advance|loop|write)[[:space:]]+[0-9]+'; then
-    TRANSITION_COUNT=$(printf '%s\n' "$COMMAND" | grep -oE 'vdgg_state_(advance|loop)[[:space:]]+[0-9]+' | wc -l | tr -d ' ')
-    if [ "${TRANSITION_COUNT:-0}" -gt 1 ]; then
-        echo "VibesDeGoGo! [${VDGG_ID}]: State transition commands must include the matching VibesDeGoGo! Step declaration." >&2
-        exit 2
-    fi
-    TARGET_STEP=$(echo "$COMMAND" | sed -nE 's/.*vdgg_state_(advance|loop|write)[[:space:]]+([0-9]+).*/\2/p' | head -1)
-    if [ -n "$TARGET_STEP" ]; then
-        DECL_OK=0
-        if echo "$COMMAND" | grep -qF "[VibesDeGoGo! Step ${TARGET_STEP} Start]"; then
-            DECL_OK=1
-        elif [ "$TARGET_STEP" = "2" ] && echo "$COMMAND" | grep -qF '[VibesDeGoGo! Declaration]'; then
-            DECL_OK=1
-        fi
-        if [ "$DECL_OK" -eq 0 ]; then
-            echo "VibesDeGoGo! [${VDGG_ID}]: State transition commands must include the matching VibesDeGoGo! Step declaration." >&2
-            exit 2
-        fi
-    fi
 fi
 
 # Guard 5: tests must run only after the workflow enters testing.
@@ -457,7 +390,7 @@ case "$PHASE" in
                 exit 2
             fi
             # verified requires a review gate: either the simplify sentinel or the
-            # explicit review sentinel (vdgg_state_mark_reviewed / vdgg_review_run),
+            # explicit review sentinel written by vdgg_review_run,
             # and the review must not have edited implementation code.
             if [ "$PHASE" = "testing" ] && echo "$COMMAND" | grep -qE 'vdgg_state_(advance|loop|write)[[:space:]]+[0-9]+[[:space:]]+verified'; then
                 # When a task allowlist is active, the task gate must have passed.

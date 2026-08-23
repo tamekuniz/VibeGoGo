@@ -34,16 +34,13 @@ Whenever work is delegated to a subagent or an external executor, output one lin
 [VibesDeGoGo! Delegate] step=N, executor=<model or command>, role=<short role>
 ```
 
-`.vdgg-target` may set `STEP_REPORT=quiet` (default: `verbose`; read it with the same safe key extraction as Step 1). Only the literal value `quiet` enables quiet mode; any other value behaves as `verbose`. In quiet mode, omit the chat Step declarations and interim narration. Bash-embedded state-transition declarations (see Step Declaration Format) are unchanged. Quiet mode never omits: the Step 0 agreement, Delegate lines, Lesson lines, `[Intentional Stop]`, `[Error Acknowledged]`, the Formation start-tier statement, the simplify-collapse reason, the Step 8 validation request, and the final completion report.
+`.vdgg-target` may set `STEP_REPORT=quiet` (default: `verbose`; read it with the same safe key extraction as Step 1). Only the literal value `quiet` enables quiet mode; any other value behaves as `verbose`. In quiet mode, omit the chat Step declarations and interim narration. Bash-embedded state-transition declarations (see Step Declaration Format) are unchanged. Quiet mode never omits: the Step 0 agreement, Delegate lines, Lesson lines, `[Intentional Stop]`, `[Error Acknowledged]`, the simplify-collapse reason, the Step 8 validation request, and the final completion report.
 
 ### Delegated step executors
 
-Steps 3, 4, and 6 communicate only through files under `tasks/vdgg/{id}/`, so their executor is swappable. Two mechanisms exist and are mutually exclusive per session:
+Steps 3, 4, and 6 communicate only through files under `tasks/vdgg/{id}/`, so their executor is swappable through **Step AI Formations** (shared with the Codex edition) — a named, complete Step-to-AI mapping that covers Step 0/3/4/6/6R/7/0-Grill Me from a single config file. See "Step AI Formations" below.
 
-1. **Step AI Formations** (preferred, shared with the Codex edition) — a named, complete Step-to-AI mapping that covers Step 0/3/4/6/6R/7/0-Grill Me from a single config file. See "Step AI Formations" below.
-2. **`.vdgg-target` `_COMMAND` keys + `STEP6_EXECUTOR_TIERS`** (legacy fallback) — per-step `STEP3_EXECUTOR_COMMAND` / `STEP4_EXECUTOR_COMMAND` and the Step 6 tier ladder `STEP6_EXECUTOR_TIERS`. Active only when no Formation is selected.
-
-Under either mechanism, output a Delegate line before delegation (see Step reporting), and validate the executor's artifacts yourself before advancing: the output file exists and contains the required headings; for Step 6, the task allowlist and `vdgg_task_gate` still apply, which catches any out-of-allowlist edits the executor made. Steps 1, 2, 5, 8, and 9 are never delegated regardless of mechanism.
+When delegating, output a Delegate line before delegation (see Step reporting), and validate the executor's artifacts yourself before advancing: the output file exists and contains the required headings; for Step 6, the task allowlist and `vdgg_task_gate` still apply, which catches any out-of-allowlist edits the executor made. Steps 1, 2, 5, 8, and 9 are never delegated regardless of mechanism.
 
 ### Step AI Formations
 
@@ -85,13 +82,11 @@ When a Formation is selected, resolve the assigned AI before acting in every Ste
 
 1. `inline`: work normally in the current agent.
 2. External AI: write the smallest sufficient input artifact under `tasks/vdgg/{id}/`, output the Delegate line, and call `vdgg_executor_run <STEP_KEY> <input-file> [output-file]`.
-3. Validate the expected artifact before advancing. A non-zero executor result, missing output, unknown AI, or invalid Formation stops the workflow with state unchanged. Never silently fall back to `inline` or to the legacy `_COMMAND`/`STEP6_EXECUTOR_TIERS` path.
+3. Validate the expected artifact before advancing. A non-zero executor result, missing output, unknown AI, or invalid Formation stops the workflow with state unchanged. Never silently fall back to `inline`.
 
 The executor receives `VDGG_EXECUTOR_FORMATION`, `VDGG_EXECUTOR_AI`, `VDGG_EXECUTOR_STEP`, `VDGG_EXECUTOR_INPUT`, and `VDGG_EXECUTOR_OUTPUT`. State transitions, task allowlists, review gates, and commit permissions remain owned by the controlling VDGG session — Claude Code hooks continue to enforce them.
 
 Naming an AI on a seat assigns the *work product* of that step, never the mechanics: state transitions, task allowlists, review gates, and commit permissions stay with the controlling VDGG session at every step, and the Claude Code hooks continue to enforce them. So an AI named on Step 1, 2, 5, 8, or 9 drafts or decides the artifact for that step — the branch name, `requirements.md`, the next task and its allowlist, the progress update, the commit message — while this session performs the state write, the gate arming, and the git operation. Seats `0` and `0G` are conversational, so a bundled one-shot wrapper there answers in a single pass instead of holding a dialogue; use a bare executor that can own the conversation when that matters.
-
-Relationship with the legacy path: when a Formation is selected, `STEP3_EXECUTOR_COMMAND`, `STEP4_EXECUTOR_COMMAND`, and `STEP6_EXECUTOR_TIERS` are ignored — the Formation's `STEP_3_AI`/`STEP_4_AI`/`STEP_6_AI` are authoritative. When no Formation is selected, the legacy `_COMMAND` keys and the tier ladder below apply as historically. Do not mix both in the same session.
 
 ### Local llama-server executors
 
@@ -103,20 +98,6 @@ When a Formation assigns a Step to an executor backed by a locally-hosted `llama
 - [`references/local-inference-setup.md`](references/local-inference-setup.md) — first-run walkthrough for macOS launchd (tested) and Linux systemd (schema-compatible, awaiting community verification).
 
 Executor `COMMAND=` lines can then call `vdgg-llm-start <id>` through a wrapper that sends the actual request to `http://127.0.0.1:<port>`. Only the port/api key move; the executor script itself no longer hard-codes them.
-
-### Step 6 Executor Tiers (no Formation)
-
-Applies only when no Formation is selected (`VDGG_FORMATION` unset and no `--formation` given to `vdgg_state_init`). When a Formation is active, this section does not apply — use `STEP_6_AI` from the Formation instead.
-
-Activation: when `.vdgg-target` sets `STEP6_EXECUTOR_TIERS` (see `references/target_schema.md`), Step 6 uses a tier ladder instead of a single executor. The value is an ordered `|`-separated list of executor commands, cheapest first; the reserved terminal tier `inline` means the agent implements the task itself. When `STEP6_EXECUTOR_TIERS` is unset, Step 6 runs inline.
-
-Start tier: each task starts at tier 1. Exception — the agent MAY start a task at a higher tier when the task is clearly heavyweight: contract changes (API, persistence, auth, security), changes spanning multiple modules, or concurrency-sensitive work. State the chosen start tier and the reason in the user-facing text.
-
-Escalation rule: the first verification failure of a task stays on the same tier — go through reflection (Step 6-R) and retry on that tier. When the same task fails verification a second time (the re-implementation that would run at loop=2), escalate to the next tier: run `vdgg_task_rollback` to restore the baseline so the higher tier re-implements cleanly, and pass the accumulated `investigation-r*.md` notes to the next tier's prompt (the `failure notes` input in `references/subagent_prompts.md`). `inline` is the last tier and follows the normal flow with no further escalation. If the ladder does not end with `inline`, the last configured tier is treated the same way — its further failures do not escalate; stay on that tier and continue the normal reflection loop.
-
-Review ordering: run the external review (`REVIEW_COMMAND` / `vdgg_review_run`) only after `vdgg_task_gate` verification has passed, so failed cheap-tier attempts never consume external review quota. On review findings (high/medium), the CURRENT tier applies the findings first; if the review rejects the work a second time, escalate one tier (same rollback-and-handoff procedure).
-
-Record keeping: record in `progress.md`, per task, the settling tier and loop count (e.g. `T1: settled at tier 1, loop=0` / `T2: escalated to tier 2, loop=2`). The final completion report must include a one-line-per-task Formation summary in the same form.
 
 ## Standard-First Contract
 
@@ -218,7 +199,7 @@ Steps 2 and later use this one-line format:
 [VibesDeGoGo! Step N Start] step=N, phase=PHASE_NAME, loop=LOOP_COUNT
 ```
 
-The hooks validate declarations inside Bash command text for state transitions. Use the exact strings above.
+Declarations are a reporting convention for the user and the transcript; the hooks no longer validate them. State-transition legality is enforced by the `vdgg_state_*` helpers themselves.
 
 ## Step 0: Agree On Requirements
 
@@ -387,7 +368,7 @@ vdgg_state_advance 3 investigating
 
 Use subagents only when parallel investigation clearly helps.
 
-When a Formation is selected and `vdgg_formation_resolve STEP_3_AI` returns a non-`inline` AI, output the Delegate line, write the investigation prompt (see `references/subagent_prompts.md`) with filled-in paths as the input artifact, and call `vdgg_executor_run STEP_3_AI <input-file> tasks/vdgg/{id}/investigation.md`. Validate the required headings on the output before advancing. When no Formation is selected but `.vdgg-target` sets `STEP3_EXECUTOR_COMMAND`, use that legacy path instead.
+When a Formation is selected and `vdgg_formation_resolve STEP_3_AI` returns a non-`inline` AI, output the Delegate line, write the investigation prompt (see `references/subagent_prompts.md`) with filled-in paths as the input artifact, and call `vdgg_executor_run STEP_3_AI <input-file> tasks/vdgg/{id}/investigation.md`. Validate the required headings on the output before advancing.
 
 ## Step 4: Planning
 
@@ -406,7 +387,7 @@ Then advance:
 vdgg_state_advance 4 planning
 ```
 
-When a Formation is selected and `vdgg_formation_resolve STEP_4_AI` returns a non-`inline` AI, output the Delegate line, write the planning prompt with filled-in paths as the input artifact, and call `vdgg_executor_run STEP_4_AI <input-file> tasks/vdgg/{id}/todo.md`. Validate the output before advancing (both `todo.md` and `progress.md` must exist). When no Formation is selected but `.vdgg-target` sets `STEP4_EXECUTOR_COMMAND`, use that legacy path instead.
+When a Formation is selected and `vdgg_formation_resolve STEP_4_AI` returns a non-`inline` AI, output the Delegate line, write the planning prompt with filled-in paths as the input artifact, and call `vdgg_executor_run STEP_4_AI <input-file> tasks/vdgg/{id}/todo.md`. Validate the output before advancing (both `todo.md` and `progress.md` must exist).
 
 ## Step 5: Select One Task
 
@@ -431,7 +412,7 @@ vdgg_state_advance 6 implementing
 
 Do not run tests in `implementing`; the hook blocks test commands until Step 7. Edit/Write outside the task allowlist is blocked. `vdgg_task_begin` can only (re)arm at Step 5 — the state machine rejects it from `implementing`/`reflection` (6 -> 5 is not a legal transition). If the scope legitimately grew mid-task, either narrow the change to fit the current allowlist, or finish this task through Step 8 and select the extra scope as a new task at Step 5 (8 -> 5) with the right allowlist.
 
-When a Formation is selected and `vdgg_formation_resolve STEP_6_AI` returns a non-`inline` AI, output the Delegate line, write the implementation prompt (see `references/subagent_prompts.md`) with filled-in paths and the current task's allowlist as the input artifact, and call `vdgg_executor_run STEP_6_AI <input-file>`. The executor edits files in the working tree; the task allowlist and `vdgg_task_gate` still apply, so out-of-allowlist edits are caught at Step 7. When no Formation is selected, `STEP6_EXECUTOR_TIERS` (if set) governs Step 6 — see "Step 6 Executor Tiers (no Formation)" above; otherwise Step 6 runs inline.
+When a Formation is selected and `vdgg_formation_resolve STEP_6_AI` returns a non-`inline` AI, output the Delegate line, write the implementation prompt (see `references/subagent_prompts.md`) with filled-in paths and the current task's allowlist as the input artifact, and call `vdgg_executor_run STEP_6_AI <input-file>`. The executor edits files in the working tree; the task allowlist and `vdgg_task_gate` still apply, so out-of-allowlist edits are caught at Step 7. When no Formation is selected, Step 6 runs inline.
 
 ## Step 7: Verify
 
@@ -466,11 +447,11 @@ vdgg_review_run                      # runs REVIEW_COMMAND from .vdgg-target
 vdgg_review_run <command> [args...]  # runs an explicit review command
 ```
 
-When a Formation is selected and `vdgg_formation_resolve STEP_7_AI` returns a non-`inline` AI, output the Delegate line, write the review prompt with the working-tree diff and verification results as the input artifact, and call `vdgg_executor_run STEP_7_AI <input-file> <findings-output>`. The Formation review is read-only (findings only, no edits); apply the same severity-based response below, then record the gate with `vdgg_state_mark_reviewed` on pass. When no Formation is selected, use `simplify` or `vdgg_review_run` as above.
+When a Formation is selected and `vdgg_formation_resolve STEP_7_AI` returns a non-`inline` AI, output the Delegate line, write the review prompt with the working-tree diff and verification results as the input artifact, and call `vdgg_review_run vdgg_executor_run STEP_7_AI <input-file> <findings-output>` so the gate is recorded only when the executor succeeds. The sentinel records that the review ran, not that it passed, so apply the severity-based response below before advancing. The Formation review is read-only (findings only, no edits). When no Formation is selected, use `simplify` or `vdgg_review_run` as above.
 
-It writes the review sentinel only when the command exits 0. A purely manual review can still be recorded with `vdgg_state_mark_reviewed`. The verified gate accepts either sentinel — simplify or explicit review — and both are subject to the same rule: implementation edits after the review flip `modified=1` and route through reflection. Prefer the simplify skill when it is available; prefer a different vendor than the implementing model for external review. For code that ships to other machines or handles user data, the review prompt must include a security perspective (injection, secrets exposure, unsafe file/network/exec operations) — simplify does not cover security. Sentinel files cannot be written directly; the hooks block Edit/Write/Bash writes to `.claude/.vdgg-*` paths.
+It writes the review sentinel only when the command exits 0, and it is the documented way to write one: recording the gate means running a command that succeeds, rather than calling a bare marker. The verified gate accepts either sentinel — simplify or explicit review — and both are subject to the same rule: implementation edits after the review flip `modified=1` and route through reflection. Prefer the simplify skill when it is available; prefer a different vendor than the implementing model for external review. For code that ships to other machines or handles user data, the review prompt must include a security perspective (injection, secrets exposure, unsafe file/network/exec operations) — simplify does not cover security. Sentinel files cannot be written directly; the hooks block Edit/Write/Bash writes to `.claude/.vdgg-*` paths.
 
-For a **subjective artifact** (docs, copy, naming, design — where quality is a judgment, not something a test can decide), the review gate can be the `MAGI` skill when it is installed: run MAGI as the review and record the gate with `vdgg_state_mark_reviewed` only when MAGI passes. If MAGI is not installed, skip it and use the standard `simplify`/review gate above. MAGI judges desirability, not code correctness — correctness still rides on tests and `simplify`.
+For a **subjective artifact** (docs, copy, naming, design — where quality is a judgment, not something a test can decide), the review gate can be the `MAGI` skill when it is installed: run MAGI as the review, write its verdict line to `tasks/vdgg/{id}/magi-verdict.md`, and record the gate with `vdgg_review_run grep -q '^MAGI判定: 可決' tasks/vdgg/{id}/magi-verdict.md`, so a deliberation recorded as 未達 cannot open it. The verdict file is written by the agent, so this checks the record, not the deliberation itself. If MAGI is not installed, skip it and use the standard `simplify`/review gate above. MAGI judges desirability, not code correctness — correctness still rides on tests and `simplify`.
 
 ### simplify subagent consolidation
 

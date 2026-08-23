@@ -38,7 +38,7 @@ vdgg_state_read
 vdgg_state_write <step> <phase> <loop_count> [current_task] [task_allowlist_file] [task_base_ref]
 vdgg_state_advance <step> <phase>
 vdgg_state_loop <step> <phase>
-vdgg_state_mark_reviewed
+vdgg_review_run [review command...]
 vdgg_task_begin <task title> <allowed path>...
 vdgg_task_changed_files
 vdgg_task_check_allowlist
@@ -64,13 +64,15 @@ success — required before `verified` whenever an allowlist is active.
 outside the allowlist changed, it refuses — resolve those manually (e.g.
 `git status` + `git checkout -- <file>`) before retrying.
 
-`vdgg_state_mark_reviewed` is the explicit review marker for review passes
-done without the Claude Code `simplify` skill (manual review or an external
-reviewer via `REVIEW_COMMAND`). It writes a per-loop review sentinel under
-`.claude/.vdgg-review-sentinel-{id}-{loop}` with `modified=0`. The verified
-gate accepts either the simplify sentinel or this review sentinel; both flip
-to `modified=1` when implementation files are edited afterward in the same
-loop. See `SKILL.md` Step 7 for the full gate description.
+`vdgg_review_run` is the review gate for passes done without the Claude Code
+`simplify` skill. It runs the review command — an explicit one, or
+`REVIEW_COMMAND` from `.vdgg-target` — and writes a per-loop review sentinel
+under `.claude/.vdgg-review-sentinel-{id}-{loop}` with `modified=0` only when
+that command exits 0; it is the documented way to write that sentinel. The
+verified gate accepts either the
+simplify sentinel or this review sentinel; both flip to `modified=1` when
+implementation files are edited afterward in the same loop. See `SKILL.md`
+Step 7 for the full gate description.
 
 ## Transition Rules
 

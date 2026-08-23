@@ -208,7 +208,7 @@ fi
 if [ "$TOOL_NAME" = "Bash" ]; then
   # Sidecar files (.codex/.vdgg-*) may only be written through vdgg_state_*
   # helpers, and .vdgg-target only by a human (it holds executed config:
-  # REVIEW_COMMAND, STEP*_EXECUTOR_COMMAND). Split the command into shell
+  # REVIEW_COMMAND). Split the command into shell
   # segments so a `git commit` segment (whose message may mention such a path)
   # cannot shield a mutating segment in the same line, e.g.
   #   git commit -m x && rm -f .codex/.vdgg-active
@@ -248,16 +248,6 @@ if [ "$TOOL_NAME" = "apply_patch" ] || [ "$TOOL_NAME" = "Edit" ] || [ "$TOOL_NAM
     [ -n "$file_path" ] || continue
     path_is_sidecar_file "$file_path" && block "Direct edits to VibesDeGoGo! sidecar files are blocked. Use vdgg_state_* helpers."
   done < <(changed_files)
-fi
-
-if [ "$TOOL_NAME" = "Bash" ] && printf '%s' "$COMMAND" | grep -qE 'vdgg_state_(advance|loop|write)[[:space:]]+[0-9]+'; then
-  TARGET_STEP=$(printf '%s' "$COMMAND" | sed -nE 's/.*vdgg_state_(advance|loop|write)[[:space:]]+([0-9]+).*/\2/p' | head -1)
-  if [ -n "$TARGET_STEP" ]; then
-    if ! printf '%s' "$COMMAND" | grep -qF "[VibesDeGoGo! Step ${TARGET_STEP} Start]" \
-      && ! { [ "$TARGET_STEP" = "2" ] && printf '%s' "$COMMAND" | grep -qF '[VibesDeGoGo! Declaration]'; }; then
-      block "State transition commands must include the matching VibesDeGoGo! Step declaration."
-    fi
-  fi
 fi
 
 if [ "$TOOL_NAME" = "Bash" ] && [ "$PHASE" = "requirements" ]; then
@@ -317,7 +307,7 @@ case "$PHASE" in
           [ -f "$TASK_GATE_FILE" ] || block "Run vdgg_task_gate successfully before verified."
         fi
         REVIEW_FILE="$CWD/.codex/.vdgg-review-sentinel-${VDGG_ID}-${LOOP_COUNT}"
-        [ -f "$REVIEW_FILE" ] || block "Run the Codex review gate with vdgg_state_mark_reviewed before verified."
+        [ -f "$REVIEW_FILE" ] || block "Run the Codex review gate with vdgg_review_run before verified."
         MODIFIED=$(grep '^modified=' "$REVIEW_FILE" | sed 's/^modified=//' | head -1)
         [ "$MODIFIED" != "1" ] || block "Review changed files. Go through reflection and retest."
         rm -f "$REVIEW_FILE"

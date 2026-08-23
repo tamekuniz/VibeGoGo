@@ -112,7 +112,8 @@ Exit codes:
 | Code | Meaning                                                                                       |
 |------|-----------------------------------------------------------------------------------------------|
 | 0    | Success (`--check` clean; launch replaced by `llama-server`).                                 |
-| 2    | The requested `<id>` is not defined in `servers.conf`, or a required key is missing.          |
+| 1    | `--check` found lint findings (missing/invalid keys, duplicate port or alias).                |
+| 2    | The requested `<id>` is not defined in `servers.conf`, or a line is malformed.                |
 | 4    | `api_key_file` is missing or has the wrong permissions.                                       |
 | 64   | Usage error (`--dry-run` without an id, unknown option, no arguments).                        |
 
@@ -124,7 +125,7 @@ If you need to expose a new `llama-server` flag as a first-class key:
 2. Update `scripts/vdgg-llm-start.sh` to parse the key (in `_parse_block`),
    emit the flag (in `_emit_argv`), and lint it (in `_check_kv`).
 3. Update `references/servers.conf.example` to demonstrate the key.
-4. Add a test case in the launcher's verification script.
+4. Verify with `vdgg-llm-start --check`.
 
 For a one-off `llama-server` flag that doesn't warrant its own key, use
 `extra_flags`.
