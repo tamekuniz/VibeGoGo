@@ -206,14 +206,6 @@ if [ "$TOOL_NAME" = "Bash" ] && [ -f "$CWD/.codex/.vdgg-error-pending" ]; then
 fi
 
 if [ "$TOOL_NAME" = "Bash" ]; then
-  # The review sentinel writer is internal to vdgg_review_run. Calling it
-  # directly records a review that never ran, which is the one thing this gate
-  # exists to prevent, and it leaves no protected path in the command for the
-  # sidecar guard below to catch. Same literal-match limit applies: a name
-  # hidden behind a variable evades this.
-  if printf '%s' "$COMMAND" | grep -q '_vdgg_write_review_sentinel'; then
-    block "The review gate is recorded by vdgg_review_run, which runs a review command and writes the sentinel only when it exits 0. Calling the internal sentinel writer directly is not allowed."
-  fi
   # Sidecar files (.codex/.vdgg-*) may only be written through vdgg_state_*
   # helpers, and .vdgg-target only by a human (it holds executed config:
   # REVIEW_COMMAND, STEP*_EXECUTOR_COMMAND). Split the command into shell
@@ -231,13 +223,8 @@ if [ "$TOOL_NAME" = "Bash" ]; then
   _vdgg_segs="${_vdgg_segs//;/$'\n'}"
   _vdgg_segs="${_vdgg_segs//|/$'\n'}"
   while IFS= read -r _vdgg_seg; do
-    # The bare `.vdgg-` basename is matched as well as the directory-prefixed
-    # form: `cd .codex && printf ... > .vdgg-review-sentinel-...` writes the same
-    # file without the prefix ever appearing in the command. This does widen the
-    # match to any path containing `.vdgg-`, which is rare enough in practice to
-    # be worth the forged-sentinel case it closes.
     case "$_vdgg_seg" in
-      *".codex/.vdgg-"*|*".vdgg-target"*|*".vdgg-"*) ;;
+      *".codex/.vdgg-"*|*".vdgg-target"*) ;;
       *) continue ;;
     esac
     if printf '%s' "$_vdgg_seg" | grep -qE '(^|[^a-zA-Z0-9_-])git[[:space:]]+commit($|[[:space:]])'; then

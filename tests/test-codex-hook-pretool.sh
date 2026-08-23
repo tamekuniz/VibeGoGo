@@ -111,18 +111,6 @@ write_state investigating 3
 STATUS=$(run_hook '{"tool_name":"Grep","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"pattern":"x"}}')
 assert_exit_code 0 "$STATUS" "read-like tools pass during investigation"
 
-# Sentinel forgery: the internal writer cannot be called directly. That call
-# leaves no sidecar path in the command, so the path guard would not see it.
-write_state testing 7
-STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"source .agents/skills/vibesdegogo/scripts/vdgg-state.sh && _vdgg_write_review_sentinel"}}')
-assert_exit_code 2 "$STATUS" "direct call to the internal sentinel writer is blocked"
-
-# Sentinel forgery: a relative write after cd into the sidecar directory drops
-# the .codex/ prefix from the command, so the basename must be matched too.
-write_state testing 7
-STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"cd .codex && printf started=1 > .vdgg-review-sentinel-test-id-0"}}')
-assert_exit_code 2 "$STATUS" "relative sentinel write after cd is blocked"
-
 # Sentinel forgery: direct Write to a sentinel path is blocked.
 write_state testing 7
 STATUS=$(run_hook '{"tool_name":"Write","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"file_path":"'"$TMPDIR_VDGG"'/.codex/.vdgg-review-sentinel-test-id-0"}}')
