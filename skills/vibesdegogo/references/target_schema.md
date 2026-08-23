@@ -51,10 +51,6 @@ TEST_COMMAND_PATTERN="<extended regex>"
 # Treated as off if the Grill Me skill is not installed.
 GRILLME=auto
 
-# Chat step reporting (verbose/quiet). quiet omits chat step declarations
-# and interim narration; see SKILL.md "Step reporting" for the never-omit list.
-STEP_REPORT=verbose
-
 # Entry gate. Normally the hooks are fail-open while no VibesDeGoGo! session
 # is armed (no .claude/.vdgg-active), so unrelated repositories are never
 # blocked. Setting VDGG_REQUIRED=on opts this repository out of that

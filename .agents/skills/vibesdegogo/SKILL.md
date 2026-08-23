@@ -18,7 +18,7 @@ Do not use it for wording-only requests, open-ended discussion, or brainstorming
 
 ## Agent Role
 
-- Declare before acting: output a Step declaration at the beginning of each Step (unless `STEP_REPORT=quiet` — see Step reporting below).
+- Declare before acting: output a Step declaration at the beginning of each Step.
 
 ### Step reporting
 
@@ -27,17 +27,6 @@ Whenever work is delegated to a subagent or an external executor, output one lin
 ```text
 [VibesDeGoGo! Delegate] step=N, executor=<model or command>, role=<short role>
 ```
-
-`.vdgg-target` may set (read with safe key extraction — never `source` the file):
-
-```bash
-# Chat step reporting. quiet omits chat step declarations and interim
-# narration. Only the literal value quiet enables quiet mode; any other
-# value behaves as verbose.
-STEP_REPORT=verbose
-```
-
-In quiet mode, omit the chat Step declarations and interim narration. Bash-embedded state-transition declarations are a reporting convention and are unchanged. Quiet mode never omits: the Step 0 agreement, Delegate lines, Lesson lines, `[Intentional Stop]`, `[Error Acknowledged]` (embedded in the next Bash command string, not chat text — see Important Codex Differences), the Step 8 validation request, and the final completion report.
 
 ### Step AI Formations
 

@@ -18,7 +18,7 @@ Trigger phrases include `/VibesDeGoGo!`, "use VibesDeGoGo!", and similar request
 
 ## Agent Role
 
-- Declare before acting: output a Step declaration at the beginning of each Step (unless `STEP_REPORT=quiet` — see Step reporting below).
+- Declare before acting: output a Step declaration at the beginning of each Step.
 - Update the state file: every Step start and completion must update state through `vdgg_state_*` helpers.
 - Lead Steps 1, 2, 5, 8, and 9 directly.
 - Execute Steps 3, 4, 6, and 7 directly unless delegation is clearly better.
@@ -33,8 +33,6 @@ Whenever work is delegated to a subagent or an external executor, output one lin
 ```text
 [VibesDeGoGo! Delegate] step=N, executor=<model or command>, role=<short role>
 ```
-
-`.vdgg-target` may set `STEP_REPORT=quiet` (default: `verbose`; read it with the same safe key extraction as Step 1). Only the literal value `quiet` enables quiet mode; any other value behaves as `verbose`. In quiet mode, omit the chat Step declarations and interim narration. Bash-embedded state-transition declarations (see Step Declaration Format) are unchanged. Quiet mode never omits: the Step 0 agreement, Delegate lines, Lesson lines, `[Intentional Stop]`, `[Error Acknowledged]`, the simplify-collapse reason, the Step 8 validation request, and the final completion report.
 
 ### Delegated step executors
 
