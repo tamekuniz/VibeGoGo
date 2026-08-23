@@ -25,23 +25,6 @@ helpers instead. The same write protection also applies to `.vdgg-target`
 (reads stay allowed), so the agent cannot self-author `REVIEW_COMMAND` or a
 `STEP*_EXECUTOR_COMMAND` to forge a passing review or run an arbitrary command.
 
-Step declarations are validated for Bash commands that call:
-
-```text
-vdgg_state_advance
-vdgg_state_loop
-vdgg_state_write
-```
-
-The Bash command text must include the matching declaration:
-
-```bash
-# [VibesDeGoGo! Step 3 Start] step=3, phase=investigating, loop=0
-source "$VDGG_SKILL_DIR/scripts/vdgg-state.sh" && vdgg_state_advance 3 investigating
-```
-
-For Step 2, `[VibesDeGoGo! Declaration]` is also accepted because it follows Step 1 initialization.
-
 ## Phase Behavior
 
 | phase | Step | Edit/Write | Bash | Agent |

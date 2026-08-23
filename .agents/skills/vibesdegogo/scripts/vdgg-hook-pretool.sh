@@ -250,16 +250,6 @@ if [ "$TOOL_NAME" = "apply_patch" ] || [ "$TOOL_NAME" = "Edit" ] || [ "$TOOL_NAM
   done < <(changed_files)
 fi
 
-if [ "$TOOL_NAME" = "Bash" ] && printf '%s' "$COMMAND" | grep -qE 'vdgg_state_(advance|loop|write)[[:space:]]+[0-9]+'; then
-  TARGET_STEP=$(printf '%s' "$COMMAND" | sed -nE 's/.*vdgg_state_(advance|loop|write)[[:space:]]+([0-9]+).*/\2/p' | head -1)
-  if [ -n "$TARGET_STEP" ]; then
-    if ! printf '%s' "$COMMAND" | grep -qF "[VibesDeGoGo! Step ${TARGET_STEP} Start]" \
-      && ! { [ "$TARGET_STEP" = "2" ] && printf '%s' "$COMMAND" | grep -qF '[VibesDeGoGo! Declaration]'; }; then
-      block "State transition commands must include the matching VibesDeGoGo! Step declaration."
-    fi
-  fi
-fi
-
 if [ "$TOOL_NAME" = "Bash" ] && [ "$PHASE" = "requirements" ]; then
   if printf '%s' "$COMMAND" | grep -qE 'vdgg_state_(advance|loop|write)[[:space:]]+3[[:space:]]+investigating'; then
     [ -f "$TASKS_DIR/requirements.md" ] || block "requirements.md is required before investigation."

@@ -37,7 +37,7 @@ Whenever work is delegated to a subagent or an external executor, output one lin
 STEP_REPORT=verbose
 ```
 
-In quiet mode, omit the chat Step declarations and interim narration. Bash-embedded state-transition declarations (validated by the hooks) are unchanged. Quiet mode never omits: the Step 0 agreement, Delegate lines, Lesson lines, `[Intentional Stop]`, `[Error Acknowledged]` (embedded in the next Bash command string, not chat text — see Important Codex Differences), the Step 8 validation request, and the final completion report.
+In quiet mode, omit the chat Step declarations and interim narration. Bash-embedded state-transition declarations are a reporting convention and are unchanged. Quiet mode never omits: the Step 0 agreement, Delegate lines, Lesson lines, `[Intentional Stop]`, `[Error Acknowledged]` (embedded in the next Bash command string, not chat text — see Important Codex Differences), the Step 8 validation request, and the final completion report.
 
 ### Step AI Formations
 

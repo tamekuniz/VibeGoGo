@@ -84,15 +84,10 @@ fi
 # `set -e`. When only a string is available there is no exit_code, so failure
 # detection below falls back to scanning the response text (best-effort).
 EXIT_CODE=$(printf '%s' "$INPUT" | jq -r 'if (.tool_response|type)=="object" then (.tool_response.exit_code // .tool_response.metadata.exit_code // 0) else 0 end' 2>/dev/null || echo 0)
-# Broad error-pattern scan target. For object shape, join only stderr+output so
-# that normal stdout containing an error word (e.g. `git log` showing
-# "a1b2c3 fix: error in parser") is not misdetected. stdout is checked
-# separately with a strict pattern below. For string shape there is no
-# stdout/stderr distinction, so scan the whole string.
+# Response text is used for the error-flag excerpt, and — string shape only,
+# where no exit_code exists — as the sole failure signal.
+RESP_SHAPE=$(printf '%s' "$INPUT" | jq -r '.tool_response|type' 2>/dev/null || echo null)
 RESP_TEXT=$(printf '%s' "$INPUT" | jq -r 'if (.tool_response|type)=="object" then [(.tool_response.stderr//""),(.tool_response.output//"")]|join("\n") elif (.tool_response|type)=="string" then .tool_response else "" end' 2>/dev/null || true)
-# Object-shape stdout only. Checked with a strict start-of-line pattern below so
-# normal command output is not treated as an error. Empty for string/null shapes.
-STDOUT_TEXT=$(printf '%s' "$INPUT" | jq -r 'if (.tool_response|type)=="object" then (.tool_response.stdout//"") else "" end' 2>/dev/null || true)
 
 if printf '%s' "$COMMAND" | grep -qE 'vdgg_state_(init|write|advance|loop|clear|read)|vdgg_review_run'; then
   exit 0
@@ -115,20 +110,12 @@ if [ "${EXIT_CODE:-0}" -ne 0 ]; then
   fi
 fi
 
-if [ "$ERROR_DETECTED" -eq 0 ] && [ "$IS_SEARCH" -eq 0 ]; then
+# String-shape responses carry no exit_code, so a text scan is the only
+# failure signal there. Object shape has a real exit code; no text sniffing.
+if [ "$ERROR_DETECTED" -eq 0 ] && [ "$IS_SEARCH" -eq 0 ] && [ "$RESP_SHAPE" = "string" ]; then
   if printf '%s' "$RESP_TEXT" | grep -qE '(^|[^a-zA-Z])(error|Error|ERROR|fail|Fail|FAIL|Exception|Traceback)([^a-zA-Z]|$)'; then
     ERROR_DETECTED=1
     ERROR_REASON="tool_response matched error/fail/Exception pattern"
-  fi
-fi
-
-# Object-shape stdout gets only a strict start-of-line pattern, so normal output
-# that merely mentions "error"/"fail" mid-line is not misdetected. STDOUT_TEXT is
-# empty for string/null shapes, so this check naturally skips there.
-if [ "$ERROR_DETECTED" -eq 0 ] && [ "$IS_SEARCH" -eq 0 ]; then
-  if printf '%s' "$STDOUT_TEXT" | grep -qE '^[[:space:]]*(error|Error|ERROR|fail|Fail|FAIL):[[:space:]]'; then
-    ERROR_DETECTED=1
-    ERROR_REASON="tool_response stdout matched strict error pattern"
   fi
 fi
 

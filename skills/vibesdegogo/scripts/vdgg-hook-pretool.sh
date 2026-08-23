@@ -312,42 +312,6 @@ if [ "$TOOL_NAME" = "Bash" ]; then
     done <<< "$_vdgg_segs"
 fi
 
-# Guard 2: validate Step declarations in Bash state-transition commands.
-#
-# The hook checks tool_input.command instead of transcript text because the
-# current assistant message may not be in the transcript at PreToolUse time.
-# This prevents a valid first attempt from being falsely rejected, and prevents
-# a retry from bypassing the declaration check.
-#
-# Exception: Step 2 accepts the declaration banner emitted during initialization.
-#
-# Example:
-#   # [VibesDeGoGo! Step 3 Start] step=3, phase=investigating, loop=0
-#   source $HOME/.claude/skills/vibesdegogo/scripts/vdgg-state.sh && vdgg_state_advance 3 investigating
-#
-# Human-readable assistant text may still include the declaration, but the
-# enforceable contract is the command text.
-if [ "$TOOL_NAME" = "Bash" ] && echo "$COMMAND" | grep -qE 'vdgg_state_(advance|loop|write)[[:space:]]+[0-9]+'; then
-    TRANSITION_COUNT=$(printf '%s\n' "$COMMAND" | grep -oE 'vdgg_state_(advance|loop)[[:space:]]+[0-9]+' | wc -l | tr -d ' ')
-    if [ "${TRANSITION_COUNT:-0}" -gt 1 ]; then
-        echo "VibesDeGoGo! [${VDGG_ID}]: State transition commands must include the matching VibesDeGoGo! Step declaration." >&2
-        exit 2
-    fi
-    TARGET_STEP=$(echo "$COMMAND" | sed -nE 's/.*vdgg_state_(advance|loop|write)[[:space:]]+([0-9]+).*/\2/p' | head -1)
-    if [ -n "$TARGET_STEP" ]; then
-        DECL_OK=0
-        if echo "$COMMAND" | grep -qF "[VibesDeGoGo! Step ${TARGET_STEP} Start]"; then
-            DECL_OK=1
-        elif [ "$TARGET_STEP" = "2" ] && echo "$COMMAND" | grep -qF '[VibesDeGoGo! Declaration]'; then
-            DECL_OK=1
-        fi
-        if [ "$DECL_OK" -eq 0 ]; then
-            echo "VibesDeGoGo! [${VDGG_ID}]: State transition commands must include the matching VibesDeGoGo! Step declaration." >&2
-            exit 2
-        fi
-    fi
-fi
-
 # Guard 5: tests must run only after the workflow enters testing.
 # The default command pattern can be extended through `.vdgg-target`.
 if [ "$TOOL_NAME" = "Bash" ] && [ "$PHASE" = "implementing" ]; then

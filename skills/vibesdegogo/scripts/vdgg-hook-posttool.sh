@@ -85,7 +85,6 @@ fi
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
 EXIT_CODE=$(echo "$INPUT" | jq -r '.tool_response.exit_code // 0')
 STDERR=$(echo "$INPUT" | jq -r '.tool_response.stderr // empty')
-STDOUT=$(echo "$INPUT" | jq -r '.tool_response.stdout // empty')
 HOOK_ERROR=$(echo "$INPUT" | jq -r '.error // empty')
 
 # Skill/Edit/Write events are handled only by the testing-specific blocks below.
@@ -193,22 +192,6 @@ if [ "$ERROR_DETECTED" -eq 0 ] && [ "$HOOK_EVENT_NAME" = "PostToolUseFailure" ];
         else
             ERROR_REASON="PostToolUseFailure"
         fi
-    fi
-fi
-
-# stderr error/fail signals count only for non-search commands.
-if [ "$ERROR_DETECTED" -eq 0 ] && [ "$IS_SEARCH" -eq 0 ]; then
-    if echo "$STDERR" | grep -qE '(^|[^a-zA-Z])(error|Error|ERROR|fail|Fail|FAIL|Exception|Traceback)([^a-zA-Z]|$)'; then
-        ERROR_DETECTED=1
-        ERROR_REASON="stderr matched error/fail/Exception pattern"
-    fi
-fi
-
-# stdout is noisier, so only line-starting `error:` / `fail:` style output counts.
-if [ "$ERROR_DETECTED" -eq 0 ] && [ "$IS_SEARCH" -eq 0 ]; then
-    if echo "$STDOUT" | grep -qE '^[[:space:]]*(error|Error|ERROR|fail|Fail|FAIL):[[:space:]]'; then
-        ERROR_DETECTED=1
-        ERROR_REASON="stdout started with error/fail pattern"
     fi
 fi
 

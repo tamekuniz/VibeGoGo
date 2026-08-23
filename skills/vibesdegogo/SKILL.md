@@ -218,7 +218,7 @@ Steps 2 and later use this one-line format:
 [VibesDeGoGo! Step N Start] step=N, phase=PHASE_NAME, loop=LOOP_COUNT
 ```
 
-The hooks validate declarations inside Bash command text for state transitions. Use the exact strings above.
+Declarations are a reporting convention for the user and the transcript; the hooks no longer validate them. State-transition legality is enforced by the `vdgg_state_*` helpers themselves.
 
 ## Step 0: Agree On Requirements
 
