@@ -80,11 +80,11 @@ When a Formation is selected, resolve the assigned AI before acting in every Ste
 
 1. `inline`: work normally in the current agent.
 2. External AI: write the smallest sufficient input artifact, output the Delegate line, and call `vdgg_executor_run <STEP_KEY> <input-file> [output-file]`.
-3. Validate the expected artifact before advancing. A non-zero executor result, missing output, unknown AI, or invalid Formation stops the workflow with state unchanged. Never silently fall back to `inline` or a legacy command.
+3. Validate the expected artifact before advancing. A non-zero executor result, missing output, unknown AI, or invalid Formation stops the workflow with state unchanged. Never silently fall back to `inline`.
 
 The executor receives `VDGG_EXECUTOR_FORMATION`, `VDGG_EXECUTOR_AI`, `VDGG_EXECUTOR_MODEL`, `VDGG_EXECUTOR_EFFORT`, `VDGG_EXECUTOR_STEP`, `VDGG_EXECUTOR_INPUT`, and `VDGG_EXECUTOR_OUTPUT`. State transitions, task allowlists, review gates, and commit permissions remain owned by the controlling VDGG session.
 
-With no Formation selected, all historical behavior remains active, including the optional `.vdgg-target` `STEP3_EXECUTOR_COMMAND`, `STEP4_EXECUTOR_COMMAND`, `STEP6_EXECUTOR_COMMAND`, and `REVIEW_COMMAND` keys.
+With no Formation selected, every step runs inline; `.vdgg-target` `REVIEW_COMMAND` still configures the Step 7 review.
 
 ### Local llama-server executors
 
@@ -410,22 +410,12 @@ vdgg_review_run
 
 For a **subjective artifact** (docs, copy, naming, design — where quality is a judgment, not something a test can decide), this review pass can be the `MAGI` skill when it is installed: run MAGI as the review, write its verdict line to `tasks/vdgg/{id}/magi-verdict.md`, and record the gate with `vdgg_review_run grep -q '^MAGI判定: 可決' tasks/vdgg/{id}/magi-verdict.md`. If MAGI is not installed, do the focused review yourself as above. MAGI judges desirability, not code correctness — correctness still rides on tests and your review.
 
-Relevant `.vdgg-target` keys for Step 7 and legacy step delegation when no Formation is selected:
+Relevant `.vdgg-target` key for Step 7:
 
 ```bash
 # External review command. Must exit 0 to pass. Use a different vendor.
 REVIEW_COMMAND="claude -p 'review the working tree diff for correctness and security (injection, secrets exposure, unsafe file/network/exec operations, data loss); exit non-zero on blocking findings'"
-
-# Optional delegated step executors. When set, run the command for that step
-# instead of working inline (output a Delegate line first — see Step
-# reporting), then validate the output artifacts (file exists + required
-# headings) before advancing.
-STEP3_EXECUTOR_COMMAND=""
-STEP4_EXECUTOR_COMMAND=""
-STEP6_EXECUTOR_COMMAND=""
 ```
-
-Step 6 delegation stays subject to the task allowlist and `vdgg_task_gate`; out-of-allowlist edits by the executor are caught at the gate.
 
 ### Review findings: severity-based response
 

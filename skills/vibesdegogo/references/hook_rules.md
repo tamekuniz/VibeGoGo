@@ -22,8 +22,8 @@ output redirection or `tee`. Every other form — interpreters (`python`, `perl`
 This covers state files, the active marker, and the simplify/review sentinels —
 so the review gate cannot be satisfied by forging a sentinel. Use `vdgg_state_*`
 helpers instead. The same write protection also applies to `.vdgg-target`
-(reads stay allowed), so the agent cannot self-author `REVIEW_COMMAND` or a
-`STEP*_EXECUTOR_COMMAND` to forge a passing review or run an arbitrary command.
+(reads stay allowed), so the agent cannot self-author `REVIEW_COMMAND` to forge
+a passing review.
 
 ## Phase Behavior
 

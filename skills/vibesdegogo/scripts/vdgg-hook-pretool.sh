@@ -260,9 +260,9 @@ fi
 
 # Guard 4: block direct edits to any .claude/.vdgg-* sidecar (state, active,
 # sentinels) and to .vdgg-target in all phases. Sentinel forgery would bypass
-# the review gate; and .vdgg-target holds trusted config (REVIEW_COMMAND,
-# STEP*_EXECUTOR_COMMAND) that is executed, so letting the agent write it would
-# let it self-author a passing review or an arbitrary command.
+# the review gate; and .vdgg-target holds trusted config (REVIEW_COMMAND) that
+# is executed, so letting the agent write it would let it self-author a passing
+# review.
 if [ "$TOOL_NAME" = "Edit" ] || [ "$TOOL_NAME" = "Write" ]; then
     if [[ "$FILE_PATH" == *".claude/.vdgg-"* ]] || [[ "$FILE_PATH" == *".vdgg-target" ]]; then
         echo "VibesDeGoGo! [${VDGG_ID}]: Direct edits to VibesDeGoGo! sidecar/target files are blocked. Use vdgg_state_* helpers; .vdgg-target must be set by a human." >&2

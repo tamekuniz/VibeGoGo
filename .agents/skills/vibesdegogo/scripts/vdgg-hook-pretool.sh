@@ -208,7 +208,7 @@ fi
 if [ "$TOOL_NAME" = "Bash" ]; then
   # Sidecar files (.codex/.vdgg-*) may only be written through vdgg_state_*
   # helpers, and .vdgg-target only by a human (it holds executed config:
-  # REVIEW_COMMAND, STEP*_EXECUTOR_COMMAND). Split the command into shell
+  # REVIEW_COMMAND). Split the command into shell
   # segments so a `git commit` segment (whose message may mention such a path)
   # cannot shield a mutating segment in the same line, e.g.
   #   git commit -m x && rm -f .codex/.vdgg-active
