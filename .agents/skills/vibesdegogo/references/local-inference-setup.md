@@ -145,7 +145,7 @@ launchctl kickstart -k "gui/$(id -u)/com.YOUR_USER.vdgg.llama-qwen"
 
 ## Linux: systemd
 
-The launcher is POSIX sh and the `servers.conf` schema is identical across
+The launcher is bash and the `servers.conf` schema is identical across
 OSes; what follows is a schema-compatible unit template. If you use it,
 please open an issue confirming it works or noting what needed to change.
 

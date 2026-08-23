@@ -19,7 +19,7 @@ VDGG_LLAMA_SERVER_BIN="${VDGG_LLAMA_SERVER_BIN:-llama-server}"
 
 _prog=$(basename "$0")
 
-_die() { printf '%s: error: %s\n' "$_prog" "$*" >&2; exit "${2:-1}"; }
+_die() { printf '%s: error: %s\n' "$_prog" "$1" >&2; exit "${2:-1}"; }
 _warn() { printf '%s: warning: %s\n' "$_prog" "$*" >&2; }
 _info() { printf '%s: %s\n' "$_prog" "$*" >&2; }
 
@@ -133,8 +133,6 @@ _parse_block() {
             *=*) key="${line%%=*}"; val="${line#*=}" ;;
             *)   _die "malformed line in [$id]: $line" 2 ;;
         esac
-        # trim surrounding whitespace on key
-        key="${key# }"; key="${key% }"
         # strip a single pair of surrounding double quotes on val, then expand $HOME
         case "$val" in
             \"*\") val="${val#\"}"; val="${val%\"}" ;;
@@ -158,8 +156,7 @@ EOF
     [ -n "$KV_host" ] || KV_host="127.0.0.1"
 }
 
-# _check_api_key_perm <path> <id> <mode>
-# mode: 'refuse' (exit non-zero on violation) | 'warn' (stderr only)
+# _check_api_key_perm <path> <id>: exit 4 on a missing file or wrong mode.
 # _warn_if_public_host <id>: shared LAN-exposure warning used by --check and startup.
 # Single-sourced so wording can't drift between the two call sites.
 _warn_if_public_host() {
@@ -203,23 +200,14 @@ EOF
 }
 
 _check_api_key_perm() {
-    local f="$1" id="$2" mode="$3" perm
+    local f="$1" id="$2" perm
     if [ ! -f "$f" ]; then
-        if [ "$mode" = "refuse" ]; then
-            _die "[$id] api_key_file not found: $f" 4
-        fi
-        _warn "[$id] api_key_file not found: $f"
-        return 1
+        _die "[$id] api_key_file not found: $f" 4
     fi
     perm=$(_perm_of "$f")
     if [ "$perm" != "600" ]; then
-        if [ "$mode" = "refuse" ]; then
-            _die "[$id] api_key_file $f has mode $perm; expected 600. Run: chmod 600 '$f'" 4
-        fi
-        _warn "[$id] api_key_file $f has mode $perm; expected 600. Run: chmod 600 '$f'"
-        return 1
+        _die "[$id] api_key_file $f has mode $perm; expected 600. Run: chmod 600 '$f'" 4
     fi
-    return 0
 }
 
 _check_id() {
@@ -255,7 +243,7 @@ _check_kv() {
 
     # (b) api_key_file: refuse mode
     if [ -n "$KV_api_key_file" ]; then
-        _check_api_key_perm "$KV_api_key_file" "$id" refuse || ok=1
+        _check_api_key_perm "$KV_api_key_file" "$id"
     fi
 
     # (c) port range
@@ -345,11 +333,11 @@ _dry_run() {
 }
 
 _start() {
-    local id="$1" old_IFS argv
+    local id="$1" argv
     _parse_block "$id"
     # startup enforcement matches --check: refuse on mode!=600 or missing file
     if [ -n "$KV_api_key_file" ]; then
-        _check_api_key_perm "$KV_api_key_file" "$id" refuse
+        _check_api_key_perm "$KV_api_key_file" "$id"
     fi
     _warn_if_public_host "$id"
 
@@ -358,12 +346,10 @@ _start() {
     # IFS for the final `set --` expansion, which needs to keep any argv value
     # that contains a space (paths, prompts) as one positional.
     argv=$(_emit_argv)
-    old_IFS=$IFS
     IFS='
 '
     # shellcheck disable=SC2046,SC2086
     set -- $argv
-    IFS=$old_IFS
     exec "$@"
 }
 

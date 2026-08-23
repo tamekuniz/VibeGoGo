@@ -9,9 +9,7 @@ fi
 
 CWD=$(printf '%s' "$INPUT" | jq -r '.cwd // empty')
 [ -n "$CWD" ] || CWD=$(pwd)
-if ! ROOT=$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null); then
-  exit 0
-fi
+git -C "$CWD" rev-parse --show-toplevel >/dev/null 2>&1 || exit 0
 
 cat <<'EOF'
 {
