@@ -78,7 +78,8 @@ PostToolUse detects Bash failures and writes:
 .claude/.vdgg-error-pending
 ```
 
-Before the next tool call, PreToolUse requires assistant text containing:
+The next Bash command must contain the marker in its command text (e.g. in a
+leading comment), the same contract as the Codex edition:
 
 ```text
 [Error Acknowledged]
