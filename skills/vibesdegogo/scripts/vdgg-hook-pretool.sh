@@ -415,6 +415,26 @@ case "$PHASE" in
                     echo "VibesDeGoGo! Step ${STEP} (${PHASE}) [${VDGG_ID}]: This action is blocked in the current phase." >&2
                     exit 2
                 fi
+                # Layer 4 consistency: delegate to the canonical helper.
+                # Strict 0/1 exit + stdout tag ("layer4" | "legacy") lets the
+                # hook branch without a set -e shield.
+                _VDGG_HOOK_SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)
+                # shellcheck source=vdgg-state.sh
+                . "${_VDGG_HOOK_SCRIPT_DIR}/vdgg-state.sh"
+                if ! _vdgg_sentinel_class=$(_vdgg_validate_sentinel_fields "$GATE_FILE"); then
+                    echo "VibesDeGoGo! Step ${STEP} (${PHASE}) [${VDGG_ID}]: sentinel invariant violation; refusing verified." >&2
+                    exit 2
+                fi
+                # Layer 3 gate-read policy: block verified when a clean
+                # primary skipped vdgg_review_countersign. Legacy sentinels
+                # have no countersign_required field, so this is a no-op there.
+                if ! _vdgg_review_gate_ready "$GATE_FILE"; then
+                    echo "VibesDeGoGo! Step ${STEP} (${PHASE}) [${VDGG_ID}]: Layer 3 countersign missing for a clean primary review; refusing verified. Run vdgg_review_countersign before advancing." >&2
+                    exit 2
+                fi
+                if [ "$_vdgg_sentinel_class" = "legacy" ]; then
+                    echo "VibesDeGoGo! [${VDGG_ID}]: verified via legacy sentinel (pre-Layer-4). Consider re-running review with --review-output for Layer 1 validation." >&2
+                fi
                 # Consume the sentinels so they cannot be reused by a later cycle.
                 rm -f "$SIMPLIFY_SENTINEL" "$REVIEW_SENTINEL"
             fi

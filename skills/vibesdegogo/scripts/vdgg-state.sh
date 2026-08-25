@@ -45,6 +45,213 @@ _vdgg_review_file_for_id() {
     echo "${VDGG_STATE_DIR}/.vdgg-review-sentinel-${id}-${loop}"
 }
 
+# List every hunk in the current working tree changes as a JSON array of
+# {file, hunk_start, hunk_lines}. Sources are combined so untracked files are
+# NOT invisible to review coverage:
+#   1. `git diff HEAD --no-color --unified=0` for tracked modifications.
+#   2. `git ls-files --others --exclude-standard` for untracked new files,
+#      each synthesized as a single hunk starting at line 1 with the file's
+#      line count.
+# Used by _vdgg_validate_review_output. Empty working tree -> "[]".
+#
+# why: git diff HEAD alone omits untracked files, which lets a reviewer skip an
+#   entirely new implementation file and still pass coverage validation (see
+#   lessons L1 in this task). Reviewing "the change" must cover tracked and
+#   untracked alike; the git split is an implementation detail, not a policy.
+_vdgg_diff_hunks() {
+    command -v git >/dev/null 2>&1 || { echo "[]"; return 0; }
+    local tracked_raw untracked_files untracked_raw="" combined_raw
+    tracked_raw=$(git -C "${VDGG_CWD}" diff HEAD --no-color --unified=0 2>/dev/null || true)
+    untracked_files=$(git -C "${VDGG_CWD}" ls-files --others --exclude-standard 2>/dev/null || true)
+    if [ -n "$untracked_files" ]; then
+        while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            [ -f "${VDGG_CWD}/$f" ] || continue
+            _vdgg_is_sidecar_path "$f" && continue
+            # awk's END{NR} counts records correctly whether or not the file
+            # ends with a newline, so no separate trailing-newline compensation
+            # is needed here (unlike `wc -l`).
+            local n
+            n=$(awk 'END{print NR}' "${VDGG_CWD}/$f" 2>/dev/null)
+            n="${n:-0}"
+            # Zero-length files still get one synthetic line so a reviewer
+            # must at least acknowledge that they exist.
+            [ "$n" -eq 0 ] && n=1
+            untracked_raw+="__VDGG_UNTRACKED__ ${f} ${n}"$'\n'
+        done <<< "$untracked_files"
+    fi
+    combined_raw="${tracked_raw}"$'\n'"${untracked_raw}"
+    [ -z "$tracked_raw" ] && [ -z "$untracked_raw" ] && { echo "[]"; return 0; }
+    awk '
+        /^__VDGG_UNTRACKED__ / {
+            # Synthetic marker for an untracked file: emit one hunk covering
+            # the whole file (lines 1..n).
+            printf("%s\t%d\t%d\n", $2, 1, $3)
+            next
+        }
+        /^diff --git / {
+            # "diff --git a/path b/path" -> path (drop b/ prefix).
+            file=$4; sub(/^b\//, "", file); next
+        }
+        /^@@ / {
+            # "@@ -a,b +c,d @@" -> c is the new-side start, d is line count.
+            hunk=$3
+            sub(/^\+/, "", hunk)
+            n=split(hunk, parts, ",")
+            start=parts[1]
+            lines=(n>=2 ? parts[2] : 1)
+            # Skip pure-deletion hunks (new-side lines == 0) since there is no
+            # new code for the reviewer to inspect.
+            if (lines == 0) next
+            printf("%s\t%s\t%s\n", file, start, lines)
+        }
+    ' <<< "$combined_raw" | jq -R -s '
+        split("\n") | map(select(length > 0) | split("\t")) |
+        map({file: .[0], hunk_start: (.[1]|tonumber), hunk_lines: (.[2]|tonumber)})
+    '
+}
+
+# Validate a reviewer output file against the Layer 1 schema:
+#   {
+#     "coverage": [ {file, hunk_start, hunk_lines, judgment}, ... ],
+#     "findings": [ {file, line, severity, summary, fix, cost, id?}, ... ]
+#   }
+# Also checks that every hunk in the working-tree diff is covered by at least
+# one coverage entry (same file + overlapping line range). Emits fail reasons
+# on stderr and returns non-zero. Requires jq.
+_vdgg_validate_review_output() {
+    local review_file="$1"
+    if [ -z "$review_file" ]; then
+        echo "_vdgg_validate_review_output: review-output path is required" >&2
+        return 2
+    fi
+    if [ ! -f "$review_file" ]; then
+        echo "_vdgg_validate_review_output: file not found: $review_file" >&2
+        return 2
+    fi
+    if [ ! -s "$review_file" ]; then
+        echo "_vdgg_validate_review_output: file is empty: $review_file" >&2
+        return 2
+    fi
+    command -v jq >/dev/null 2>&1 || {
+        echo "_vdgg_validate_review_output: jq is required" >&2
+        return 2
+    }
+    # Fail fast on non-JSON or wrong top-level shape.
+    local schema_error
+    schema_error=$(jq -r '
+        if type != "object" then "top-level must be an object"
+        elif (has("coverage") | not) then "missing \"coverage\" field"
+        elif (has("findings") | not) then "missing \"findings\" field"
+        elif (.coverage | type) != "array" then "\"coverage\" must be an array"
+        elif (.findings | type) != "array" then "\"findings\" must be an array"
+        else
+          (
+            .coverage
+            | to_entries
+            | map(
+                .value as $c
+                | if ($c | type) != "object" then "coverage[\(.key)] is not an object"
+                  elif ($c.file // "" | type != "string" or . == "") then "coverage[\(.key)].file is missing or not a non-empty string"
+                  elif ($c.hunk_start // null | type != "number") then "coverage[\(.key)].hunk_start is missing or not a number"
+                  elif ($c.hunk_lines // null | type != "number") then "coverage[\(.key)].hunk_lines is missing or not a number"
+                  elif ($c.judgment // "" | . != "ok" and . != "finding") then "coverage[\(.key)].judgment must be \"ok\" or \"finding\""
+                  else ""
+                  end
+              )
+            | map(select(length > 0))
+            | .[0] // ""
+          ) as $cov_err
+          | if $cov_err != "" then $cov_err
+            else
+              (
+                .findings
+                | to_entries
+                | map(
+                    .value as $f
+                    | if ($f | type) != "object" then "findings[\(.key)] is not an object"
+                      elif ($f.file // "" | type != "string" or . == "") then "findings[\(.key)].file is missing"
+                      elif ($f.line // null | type != "number") then "findings[\(.key)].line is missing or not a number"
+                      elif ($f.severity // "" | . != "high" and . != "medium" and . != "low") then "findings[\(.key)].severity must be high/medium/low"
+                      elif ($f.summary // "" | type != "string" or . == "") then "findings[\(.key)].summary is missing"
+                      elif ($f.fix // "" | type != "string" or . == "") then "findings[\(.key)].fix is missing"
+                      elif ($f.cost // "" | . != "low" and . != "medium" and . != "high") then "findings[\(.key)].cost must be low/medium/high"
+                      else ""
+                      end
+                  )
+                | map(select(length > 0))
+                | .[0] // ""
+              )
+            end
+        end
+    ' "$review_file" 2>&1) || {
+        echo "_vdgg_validate_review_output: JSON parse failed: $schema_error" >&2
+        return 1
+    }
+    if [ -n "$schema_error" ]; then
+        echo "_vdgg_validate_review_output: schema violation: $schema_error" >&2
+        return 1
+    fi
+    # Coverage must span every diff hunk (same file + overlapping range).
+    local hunks
+    hunks=$(_vdgg_diff_hunks) || hunks="[]"
+    local missed
+    missed=$(jq -r --argjson diff "$hunks" '
+        [
+          $diff[] as $d
+          | . as $review
+          | ($review.coverage // [])
+            | map(select(
+                .file == $d.file
+                and .hunk_start <= ($d.hunk_start + $d.hunk_lines - 1)
+                and (.hunk_start + .hunk_lines - 1) >= $d.hunk_start
+              ))
+            | if length == 0 then "\($d.file):\($d.hunk_start)+\($d.hunk_lines)" else empty end
+        ]
+        | .[]
+    ' "$review_file" 2>/dev/null)
+    if [ -n "$missed" ]; then
+        echo "_vdgg_validate_review_output: coverage missed hunks:" >&2
+        echo "$missed" | sed 's/^/  /' >&2
+        return 1
+    fi
+    return 0
+}
+
+# Extract the reviewer's top-level lens_count as a sanitized non-negative
+# integer. Missing / non-numeric / negative -> 0. Prints the integer to
+# stdout. Owned by this helper (rather than inlined at the call site) so the
+# extraction expression and sanitizer rule live in one place — currently
+# used by _vdgg_validate_review_lens_count.
+_vdgg_extract_lens_count() {
+    local review_output="$1"
+    local lens_count
+    lens_count=$(jq -r '.lens_count // 0 | tostring' "$review_output" 2>/dev/null)
+    case "$lens_count" in ''|*[!0-9]*) lens_count=0 ;; esac
+    printf '%s\n' "$lens_count"
+}
+
+# Layer 2 (multi-perspective) enforcement: require lens_count >= 3. A single
+# 1-shot review is exactly the failure mode this layer exists to prevent.
+# Kept separate from _vdgg_validate_review_output (Layer 1 = schema) so the
+# two layers named in SKILL.md map to two separate mechanisms.
+#
+# On success, prints the sanitized lens_count to stdout so callers can
+# capture it (`lens=$(_vdgg_validate_review_lens_count ...) || fail`) rather
+# than spawn a second _vdgg_extract_lens_count invocation for the sentinel.
+_vdgg_validate_review_lens_count() {
+    local review_output="$1"
+    [ -f "$review_output" ] || { echo "_vdgg_validate_review_lens_count: file not found: $review_output" >&2; return 1; }
+    local lens_count
+    lens_count=$(_vdgg_extract_lens_count "$review_output")
+    if [ "$lens_count" -lt 3 ]; then
+        echo "_vdgg_validate_review_lens_count: lens_count=${lens_count} below the Layer 2 minimum (3); single/dual-pass review is not accepted." >&2
+        return 1
+    fi
+    printf '%s\n' "$lens_count"
+    return 0
+}
+
 _vdgg_task_allowlist_file_for_id() {
     local id="$1"
     local loop="$2"
@@ -129,6 +336,20 @@ _vdgg_ensure_gitignore() {
 .claude/.vdgg-*
 EOF
     echo "vdgg-state: appended VibesDeGoGo! patterns to ${gitignore}" >&2
+}
+
+# Return 0 if $1 (repo-relative path) is one of VibesDeGoGo!'s own workflow
+# sidecars (state files, sentinels, task notes) rather than user code. The
+# canonical set of sidecar path prefixes lives here so future additions
+# (new editions, new sidecar categories) update one place instead of every
+# caller. Used by _vdgg_diff_hunks so a repo whose .gitignore has not yet
+# been extended by _vdgg_ensure_gitignore is still not tripped by these
+# workflow files.
+_vdgg_is_sidecar_path() {
+    case "$1" in
+        .claude/.vdgg-*|.codex/.vdgg-*|tasks/vdgg/*) return 0 ;;
+    esac
+    return 1
 }
 
 _vdgg_get_active_id() {
@@ -845,7 +1066,157 @@ vdgg_state_loop() {
     vdgg_state_write "$loop_step" "$loop_phase" "$new_loop" "$current_task"
 }
 
+# Emit the 8-line Layer 4 sentinel body (started/started_at/modified/
+# modified_files/review_output_hash/lens_count/countersign/schema_validated)
+# to stdout. This is the ONLY place that defines the sentinel field order and
+# key names — both `_vdgg_write_review_sentinel` and the PostToolUse hook's
+# simplify-sentinel writer call through here so a schema change touches one
+# location. Missing values are written as empty strings (not absent lines)
+# so downstream `grep '^key='` always finds an anchor.
+_vdgg_render_sentinel_body() {
+    local started_at="$1" modified="$2" modified_files="$3"
+    local review_output_hash="$4" lens_count="$5" countersign="$6" schema_validated="$7"
+    local countersign_required="${8:-}"
+    cat <<EOF
+started=1
+started_at=${started_at}
+modified=${modified}
+modified_files=${modified_files}
+review_output_hash=${review_output_hash}
+lens_count=${lens_count}
+countersign=${countersign}
+schema_validated=${schema_validated}
+countersign_required=${countersign_required}
+EOF
+}
+
+# Return the highest severity among a review output's findings, printed on
+# stdout as one of high|medium|low. Empty findings (a fully clean review) or
+# a jq parse failure both collapse to low, which is what the callers want:
+# "no high or medium here." Used by both vdgg_review_run (to decide whether
+# Layer 3 countersign is required) and vdgg_review_countersign (to decide
+# whether to no-op on a non-clean primary and to judge the countersign).
+_vdgg_highest_severity() {
+    local file="$1"
+    jq -r '[.findings[]?.severity] | (if any(. == "high") then "high" elif any(. == "medium") then "medium" else "low" end)' "$file" 2>/dev/null || echo low
+}
+
+# Validate the Layer 4 sentinel schema and classify the sentinel.
+#
+# Exit codes follow the codebase's other helpers (strict 0 = pass, non-zero =
+# failure); the classification is returned as a tag on stdout, not as an
+# overloaded exit code, so consumers do not need `|| _v=$?` shields to
+# survive `set -e`.
+#
+# Stdout on success: "layer4" (all invariants hold, at least one Layer-4
+# field is present) or "legacy" (all four Layer-4 fields absent — pre-Layer-4
+# sentinel). Nothing is printed on failure.
+# Exit codes:
+#   0 = legitimate sentinel (see stdout for layer4 vs legacy)
+#   1 = invariant violation (caller must block verified)
+#   2 = usage error (missing file argument or file not readable)
+#
+# Invariants enforced when the sentinel is not legacy:
+#   - schema_validated=1 requires review_output_hash and lens_count non-empty
+#   - schema_validated=0 with lens_count>0 is contradictory
+#   - countersign, when set, must be one of none/clean/refuted
+_vdgg_validate_sentinel_fields() {
+    local sentinel_file="$1"
+    [ -f "$sentinel_file" ] || { echo "_vdgg_validate_sentinel_fields: sentinel not found: $sentinel_file" >&2; return 2; }
+    local schema="" hash="" lens="" countersign="" cs_required=""
+    # Single-pass, pure bash: no forks per field.
+    local _k _v
+    while IFS='=' read -r _k _v; do
+        case "$_k" in
+            schema_validated) schema="$_v" ;;
+            review_output_hash) hash="$_v" ;;
+            lens_count) lens="$_v" ;;
+            countersign) countersign="$_v" ;;
+            countersign_required) cs_required="$_v" ;;
+        esac
+    done < "$sentinel_file"
+    if [ -z "$schema" ] && [ -z "$hash" ] && [ -z "$lens" ] && [ -z "$countersign" ] && [ -z "$cs_required" ]; then
+        echo legacy
+        return 0
+    fi
+    if [ "$schema" = "0" ] && [ -n "$lens" ] && [ "$lens" != "0" ]; then
+        echo "_vdgg_validate_sentinel_fields: schema_validated=0 but lens_count=${lens}" >&2
+        return 1
+    fi
+    if [ "$schema" = "1" ] && [ -z "$hash" ]; then
+        echo "_vdgg_validate_sentinel_fields: schema_validated=1 but review_output_hash empty" >&2
+        return 1
+    fi
+    if [ "$schema" = "1" ] && { [ -z "$lens" ] || [ "$lens" = "0" ]; }; then
+        echo "_vdgg_validate_sentinel_fields: schema_validated=1 but lens_count=${lens:-<empty>}" >&2
+        return 1
+    fi
+    case "${countersign:-none}" in
+        none|clean|refuted) ;;
+        *) echo "_vdgg_validate_sentinel_fields: countersign=${countersign} not in {none,clean,refuted}" >&2; return 1 ;;
+    esac
+    # countersign_required, when present, is a boolean flag. The Layer 3
+    # policy check (countersign_required=1 must reach countersign=clean
+    # before the gate opens) belongs to gate-read time, not sentinel-write
+    # time — see _vdgg_review_gate_ready. This validator only enforces
+    # sentinel shape.
+    case "${cs_required:-}" in
+        ''|0|1) ;;
+        *) echo "_vdgg_validate_sentinel_fields: countersign_required=${cs_required} not in {0,1,empty}" >&2; return 1 ;;
+    esac
+    echo layer4
+    return 0
+}
+
+# Layer 3 gate-read policy: check whether a sentinel is ready to open the
+# verified gate. Called by the PreToolUse hook after shape validation
+# succeeds, so this only sees sentinels that _vdgg_validate_sentinel_fields
+# already accepted. Exits 0 (ready) when either the primary review had
+# high/medium findings (countersign_required=0, no Layer 3 needed) or the
+# countersign already ran and recorded clean. Exits 1 (block) when the
+# primary was clean and the caller skipped vdgg_review_countersign — the
+# exact shortcut Layer 3 exists to prevent.
+_vdgg_review_gate_ready() {
+    local sentinel_file="$1"
+    [ -f "$sentinel_file" ] || { echo "_vdgg_review_gate_ready: sentinel not found: $sentinel_file" >&2; return 2; }
+    local countersign="" cs_required=""
+    local _k _v
+    while IFS='=' read -r _k _v; do
+        case "$_k" in
+            countersign) countersign="$_v" ;;
+            countersign_required) cs_required="$_v" ;;
+        esac
+    done < "$sentinel_file"
+    if [ "$cs_required" = "1" ] && [ "${countersign:-none}" != "clean" ]; then
+        echo "_vdgg_review_gate_ready: primary review had no high/medium findings but vdgg_review_countersign has not recorded a clean countersign (countersign=${countersign:-none}). Layer 3 requires a diverse-reviewer countersign for clean primaries." >&2
+        return 1
+    fi
+    return 0
+}
+
 _vdgg_write_review_sentinel() {
+    # Private writer for vdgg_review_run and vdgg_review_countersign. A direct
+    # caller can bypass Layer 3 policy by asserting an arbitrary
+    # (countersign, countersign_required) combination, so this helper only
+    # accepts a call preceded by the one-shot authorization breadcrumb
+    # `_VDGG_WRITE_REVIEW_SENTINEL_AUTHORIZED=1` set on the same command
+    # (env-prefix form). The breadcrumb is unset here so the authorization
+    # cannot leak into a second call. This does not defend against an agent
+    # that hand-writes the sentinel file — that requires the caller to know
+    # the file format, which is documented — but it does close the accidental
+    # "just call the helper" shortcut.
+    if [ "${_VDGG_WRITE_REVIEW_SENTINEL_AUTHORIZED:-}" != "1" ]; then
+        echo "_vdgg_write_review_sentinel: unauthorized direct call. This helper is a private writer for vdgg_review_run / vdgg_review_countersign; direct callers bypass Layer 3 policy. Route the write through those helpers." >&2
+        return 1
+    fi
+    unset _VDGG_WRITE_REVIEW_SENTINEL_AUTHORIZED
+    # Positional args. See _vdgg_render_sentinel_body for field order/names.
+    local review_output_hash="${1:-}"
+    local lens_count="${2:-}"
+    local countersign="${3:-}"
+    local schema_validated="${4:-}"
+    local countersign_required="${5:-}"
+
     local state_file
     state_file=$(_vdgg_get_state_file)
     if [ -z "$state_file" ] || [ ! -f "$state_file" ]; then
@@ -853,28 +1224,91 @@ _vdgg_write_review_sentinel() {
         return 1
     fi
 
-    local id
+    local id loop review_file started_at tmp modified="0" modified_files=""
     id=$(_vdgg_get_active_id)
-    local loop
     loop=$(grep "^loop_count=" "$state_file" | cut -d= -f2)
     loop="${loop:-0}"
-
-    local review_file
     review_file=$(_vdgg_review_file_for_id "$id" "$loop")
-    cat > "$review_file" << EOF
-started=1
-started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-modified=0
-modified_files=
-EOF
+    started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    # Inherit modified/modified_files from the existing sentinel so that a
+    # vdgg_review_countersign write does not silently clear a modified=1 that
+    # the PostToolUse hook set between the primary review and the countersign.
+    if [ -f "$review_file" ]; then
+        local _k _v
+        while IFS='=' read -r _k _v; do
+            case "$_k" in
+                modified) modified="$_v" ;;
+                modified_files) modified_files="$_v" ;;
+            esac
+        done < "$review_file"
+    fi
+    tmp=$(mktemp "${review_file}.tmp.XXXXXX")
+    _vdgg_render_sentinel_body "$started_at" "$modified" "$modified_files" \
+        "$review_output_hash" "$lens_count" "$countersign" "$schema_validated" \
+        "$countersign_required" \
+        > "$tmp"
+    # Validator: strict 0 = legitimate (layer4 or legacy on stdout),
+    # non-zero = invariant violation. This writer is the Layer 4 producer, so
+    # any output it composes must classify as "layer4" — a "legacy" tag means
+    # the caller passed an all-empty payload, which is exactly the shape a
+    # subverted agent uses to open the gate with no review artifact. Refuse.
+    local _sentinel_tag
+    if ! _sentinel_tag=$(_vdgg_validate_sentinel_fields "$tmp"); then
+        rm -f "$tmp"
+        echo "_vdgg_write_review_sentinel: refusing to commit an invalid sentinel (see prior error)." >&2
+        return 1
+    fi
+    if [ "$_sentinel_tag" = "legacy" ]; then
+        rm -f "$tmp"
+        echo "_vdgg_write_review_sentinel: refusing to write a legacy-shape sentinel. This helper only produces Layer 4 sentinels; the all-empty payload path is a Layer 3 bypass and is rejected." >&2
+        return 1
+    fi
+    mv "$tmp" "$review_file"
     echo "vdgg-state: review gate marked for id=${id}, loop=${loop}" >&2
 }
 
 # Run an explicit review pass and mark the review gate only when it succeeds.
-# With arguments, runs them as the review command. Without arguments, runs
-# REVIEW_COMMAND from .vdgg-target via bash -c. Exit status of a failing
-# review is propagated and no sentinel is written.
+#
+# Usage:
+#   vdgg_review_run [--review-output <file>] <command> [args...]
+#   vdgg_review_run                                       # runs REVIEW_COMMAND
+#
+# --review-output <file>: Layer 1 schema validation is applied to <file>
+#   after the command exits 0. Validation failure (empty file / non-JSON /
+#   missing schema fields / diff hunks not covered) suppresses the sentinel
+#   and returns non-zero.
+#
+# When --review-output is supplied and validation passes, the sentinel is
+# extended with review_output_hash (sha256 of the reviewer output),
+# lens_count (extracted from the reviewer output's top-level "lens_count"
+# field), countersign=none, and schema_validated=1. When --review-output is
+# omitted the sentinel is still written on exit 0 for backward compat
+# (MAGI grep-style gates, legacy REVIEW_COMMAND) with schema_validated=0
+# and empty hash/lens; a stderr warning is printed in that path.
+#
+# Exit status of a failing review is propagated and no sentinel is written.
 vdgg_review_run() {
+    local review_output=""
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --review-output)
+                review_output="$2"
+                shift 2
+                ;;
+            --review-output=*)
+                review_output="${1#--review-output=}"
+                shift
+                ;;
+            --)
+                shift
+                break
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+
     if [ "$#" -gt 0 ]; then
         "$@" || return $?
     else
@@ -888,7 +1322,126 @@ vdgg_review_run() {
         fi
         bash -c "$review_command" || return $?
     fi
-    _vdgg_write_review_sentinel
+
+    local review_output_hash="" lens_count="" schema_validated="" countersign_required=""
+    if [ -n "$review_output" ]; then
+        _vdgg_validate_review_output "$review_output" || {
+            echo "vdgg_review_run: schema validation failed; sentinel not written" >&2
+            return 1
+        }
+        if ! lens_count=$(_vdgg_validate_review_lens_count "$review_output"); then
+            echo "vdgg_review_run: multi-perspective validation failed; sentinel not written" >&2
+            return 1
+        fi
+        review_output_hash=$(shasum -a 256 "$review_output" 2>/dev/null | cut -d' ' -f1)
+        schema_validated=1
+        # Layer 3 trigger: a primary that came back clean (no high/medium
+        # finding) requires an adversarial countersign before the sentinel
+        # can advance the gate. Marked here so the validator can reject a
+        # sentinel that skips vdgg_review_countersign on a clean primary.
+        local _highest
+        _highest=$(_vdgg_highest_severity "$review_output")
+        if [ "$_highest" = "high" ] || [ "$_highest" = "medium" ]; then
+            countersign_required=0
+        else
+            countersign_required=1
+        fi
+    else
+        echo "vdgg_review_run: --review-output not supplied; skipping Layer 1 schema check (backward compat). The legacy path now sets countersign_required=1 so the gate will refuse verified until a Layer-1-validated review runs with --review-output (or an adversarial countersign is recorded)." >&2
+        schema_validated=0
+        # Legacy path is a shortcut that a subverted agent could satisfy with
+        # `vdgg_review_run true`. Mark it as requiring a countersign so
+        # _vdgg_review_gate_ready blocks the gate. This forces the caller to
+        # either migrate to --review-output or explicitly run
+        # vdgg_review_countersign.
+        countersign_required=1
+    fi
+    _VDGG_WRITE_REVIEW_SENTINEL_AUTHORIZED=1 _vdgg_write_review_sentinel "$review_output_hash" "$lens_count" "none" "$schema_validated" "$countersign_required"
+}
+
+# Run an adversarial countersign pass over a review whose findings are empty
+# or all low, and update the sentinel with the countersign outcome.
+#
+# Usage:
+#   vdgg_review_countersign --original-output <file> --countersign-output <file> <command> [args...]
+#
+# - `--original-output <file>`: the review output produced by the primary
+#   review pass (already validated by Layer 1 + Layer 2 during vdgg_review_run).
+# - `--countersign-output <file>`: where the countersign reviewer must write
+#   its schema-valid output. The command is expected to populate this file.
+#
+# The countersign is only meaningful when the original review left the code
+# looking clean (no high or medium findings) — a clean judgment from a single
+# reviewer is exactly the failure mode Layer 3 exists to catch (see SKILL.md
+# "Adversarial countersign for clean reviews"). When the original has any
+# high or medium finding this helper returns 0 without running the command
+# (the primary review already flagged real problems; nothing to countersign).
+#
+# On success the sentinel's countersign field flips from "none" to "clean"
+# (both reviewers agreed the diff is clean) or "refuted" (the countersign
+# found high/medium the original missed — the caller must then treat the
+# review as failed and go to reflection).
+#
+# Return codes:
+#   0 = original was not clean (no-op) OR countersign passed as clean
+#   1 = countersign command failed / countersign output did not validate /
+#       countersign surfaced high or medium (refuted): caller must fail
+vdgg_review_countersign() {
+    local original="" countersign=""
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --original-output) original="$2"; shift 2 ;;
+            --original-output=*) original="${1#--original-output=}"; shift ;;
+            --countersign-output) countersign="$2"; shift 2 ;;
+            --countersign-output=*) countersign="${1#--countersign-output=}"; shift ;;
+            --) shift; break ;;
+            *) break ;;
+        esac
+    done
+    [ -n "$original" ] || { echo "vdgg_review_countersign: --original-output required" >&2; return 2; }
+    [ -n "$countersign" ] || { echo "vdgg_review_countersign: --countersign-output required" >&2; return 2; }
+    [ -f "$original" ] || { echo "vdgg_review_countersign: original not found: $original" >&2; return 2; }
+    [ "$#" -gt 0 ] || { echo "vdgg_review_countersign: no command given after flags" >&2; return 2; }
+    command -v jq >/dev/null 2>&1 || { echo "vdgg_review_countersign: jq required" >&2; return 2; }
+
+    # Only run when the original is clean (empty findings or all-low). Non-
+    # clean originals already flagged real problems; nothing to countersign.
+    local highest
+    highest=$(_vdgg_highest_severity "$original")
+    if [ "$highest" = "high" ] || [ "$highest" = "medium" ]; then
+        return 0
+    fi
+
+    "$@" || {
+        echo "vdgg_review_countersign: countersign command failed" >&2
+        return 1
+    }
+    _vdgg_validate_review_output "$countersign" || {
+        echo "vdgg_review_countersign: countersign output failed Layer 1 schema" >&2
+        return 1
+    }
+    _vdgg_validate_review_lens_count "$countersign" >/dev/null || {
+        echo "vdgg_review_countersign: countersign output failed Layer 2 lens_count" >&2
+        return 1
+    }
+
+    local cs_highest
+    cs_highest=$(_vdgg_highest_severity "$countersign")
+    if [ "$cs_highest" = "high" ] || [ "$cs_highest" = "medium" ]; then
+        echo "vdgg_review_countersign: countersign surfaced ${cs_highest}-severity finding the original missed; treating review as refuted." >&2
+        return 1
+    fi
+
+    # Recompute hash/lens_count from $original — the primary's values, which
+    # $original still holds unchanged. Cheaper and more direct than parsing
+    # them back off the sentinel we're about to overwrite.
+    local orig_hash orig_lens
+    orig_hash=$(shasum -a 256 "$original" 2>/dev/null | cut -d' ' -f1)
+    orig_lens=$(_vdgg_extract_lens_count "$original")
+    # countersign_required stays 1: the primary was clean, so Layer 3 still
+    # applies. Flipping countersign from "none" to "clean" is what satisfies
+    # _vdgg_review_gate_ready.
+    _VDGG_WRITE_REVIEW_SENTINEL_AUTHORIZED=1 _vdgg_write_review_sentinel "$orig_hash" "$orig_lens" "clean" 1 1
 }
 
 # Begin one task: record its title, an allowlist of files it may change, and a

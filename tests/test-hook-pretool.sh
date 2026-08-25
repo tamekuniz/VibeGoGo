@@ -95,6 +95,44 @@ STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"c
 assert_exit_code 0 "$STATUS" "verified transition is allowed with clean review sentinel"
 assert_file_not_exists "$TMPDIR_VDGG/.claude/.vdgg-review-sentinel-test-id-0" "review sentinel is consumed on verified"
 
+# Layer 3 integration: a simplify sentinel rendered by _vdgg_render_sentinel_body
+# (matching what the PostToolUse hook writes) must satisfy verified. This
+# catches shape regressions in the simplify hook path that a hand-written
+# legacy 4-field sentinel would not exercise.
+write_state testing 7
+rm -f "$TMPDIR_VDGG/.claude/.vdgg-review-sentinel-test-id-0"
+(
+  # shellcheck source=/dev/null
+  . "$ROOT/skills/vibesdegogo/scripts/vdgg-state.sh"
+  _vdgg_render_sentinel_body "2026-06-11T00:00:00Z" 0 "" "" "" none 0 0 \
+    > "$TMPDIR_VDGG/.claude/.vdgg-simplify-sentinel-test-id-0"
+)
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"# [VibesDeGoGo! Step 7 Start] step=7, phase=verified, loop=0\nvdgg_state_advance 7 verified"}}')
+assert_exit_code 0 "$STATUS" "verified transition passes with production-shape simplify sentinel"
+
+# Layer 3 integration: a review sentinel with countersign_required=1 and
+# countersign=none must BLOCK verified (Layer 3 policy — clean primary
+# skipped countersign).
+write_state testing 7
+(
+  . "$ROOT/skills/vibesdegogo/scripts/vdgg-state.sh"
+  _vdgg_render_sentinel_body "2026-06-11T00:00:00Z" 0 "" "deadbeef" 3 none 1 1 \
+    > "$TMPDIR_VDGG/.claude/.vdgg-review-sentinel-test-id-0"
+)
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"# [VibesDeGoGo! Step 7 Start] step=7, phase=verified, loop=0\nvdgg_state_advance 7 verified"}}')
+assert_exit_code 2 "$STATUS" "verified blocked by Layer 3 when clean primary lacks countersign"
+rm -f "$TMPDIR_VDGG/.claude/.vdgg-review-sentinel-test-id-0"
+
+# Layer 3 integration: same sentinel with countersign=clean must PASS.
+write_state testing 7
+(
+  . "$ROOT/skills/vibesdegogo/scripts/vdgg-state.sh"
+  _vdgg_render_sentinel_body "2026-06-11T00:00:00Z" 0 "" "deadbeef" 3 clean 1 1 \
+    > "$TMPDIR_VDGG/.claude/.vdgg-review-sentinel-test-id-0"
+)
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"# [VibesDeGoGo! Step 7 Start] step=7, phase=verified, loop=0\nvdgg_state_advance 7 verified"}}')
+assert_exit_code 0 "$STATUS" "verified passes when countersign=clean recorded"
+
 # Review gate: a modified review sentinel blocks verified.
 write_state testing 7
 cat > "$TMPDIR_VDGG/.claude/.vdgg-review-sentinel-test-id-0" <<EOF

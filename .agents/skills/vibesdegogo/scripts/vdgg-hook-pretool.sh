@@ -310,6 +310,21 @@ case "$PHASE" in
         [ -f "$REVIEW_FILE" ] || block "Run the Codex review gate with vdgg_review_run before verified."
         MODIFIED=$(grep '^modified=' "$REVIEW_FILE" | sed 's/^modified=//' | head -1)
         [ "$MODIFIED" != "1" ] || block "Review changed files. Go through reflection and retest."
+        # Layer 4 consistency via the canonical helper; strict 0/1 exit +
+        # stdout tag ("layer4" | "legacy") — no shield needed.
+        _VDGG_CX_HOOK_SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)
+        # shellcheck source=vdgg-state.sh
+        . "${_VDGG_CX_HOOK_SCRIPT_DIR}/vdgg-state.sh"
+        if ! _vdgg_sentinel_class=$(_vdgg_validate_sentinel_fields "$REVIEW_FILE"); then
+          block "sentinel invariant violation."
+        fi
+        # Layer 3 gate-read policy: clean primary must reach clean countersign.
+        if ! _vdgg_review_gate_ready "$REVIEW_FILE"; then
+          block "Layer 3 countersign missing for a clean primary review. Run vdgg_review_countersign before advancing."
+        fi
+        if [ "$_vdgg_sentinel_class" = "legacy" ]; then
+          printf '%s\n' "VibesDeGoGo! [${VDGG_ID}]: verified via legacy sentinel (pre-Layer-4). Consider re-running review with --review-output for Layer 1 validation." >&2
+        fi
         rm -f "$REVIEW_FILE"
       fi
     fi
