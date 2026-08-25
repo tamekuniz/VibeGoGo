@@ -406,6 +406,20 @@ Relevant `.vdgg-target` key for Step 7:
 REVIEW_COMMAND="claude -p 'review the working tree diff for correctness and security (injection, secrets exposure, unsafe file/network/exec operations, data loss); exit non-zero on blocking findings'"
 ```
 
+### Review prompts must request concrete fixes, not only findings
+
+Every Step 7 review prompt — self-review, Formation Step 7 executor calls, external `vdgg_review_run` reviewers, and MAGI verdicts on subjective artifacts — MUST require the reviewer to include the concrete fix for each finding alongside the problem statement. Findings without a proposed fix push the implementer back into guessing what the reviewer meant, which is the shape past regressions have taken. This is the default; there is no per-task opt-in.
+
+When writing the prompt, require each finding to carry:
+
+- `file`, `line` — where the problem is.
+- `severity` — `high` / `medium` / `low` (mandatory; see the severity-based response section below).
+- `summary` — one sentence stating the problem.
+- `fix` — a concrete code snippet, unified diff, or step-by-step instruction that resolves it. "Consider X" / "may want to Y" is not acceptable — the reviewer must commit to a specific change. If the reviewer genuinely cannot propose a fix, write `fix: unknown, needs investigation` so the implementer treats it as a research task instead of a guess.
+- `cost` — reviewer's estimate of implementation effort (low / medium / high), used by the implementer to plan the fix batch.
+
+The implementer still owns the final decision (accept, skip, or defer to `followup.md`); the reviewer's job is to make that decision cheap by handing over a fix the implementer can adopt, adapt, or reject on concrete grounds.
+
 ### Review findings: severity-based response
 
 After the Step 7 review — self-review, `vdgg_review_run`, or MAGI — surfaces findings, classify each one and decide before editing:
