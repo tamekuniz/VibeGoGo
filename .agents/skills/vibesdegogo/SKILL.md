@@ -406,6 +406,26 @@ Relevant `.vdgg-target` key for Step 7:
 REVIEW_COMMAND="claude -p 'review the working tree diff for correctness and security (injection, secrets exposure, unsafe file/network/exec operations, data loss); exit non-zero on blocking findings'"
 ```
 
+### Multi-perspective review is mandatory (Layer 2)
+
+Single-pass Step 7 review is prohibited. The reviewer must inspect the diff through **N ≥ 3 independent perspectives** ("lenses"), and the merged review output must carry `lens_count` at the top level so `vdgg_review_run` can verify the requirement was met (a lens_count below 3 is rejected by the Layer 2 validator that `vdgg_review_run` invokes after Layer 1). This is the default; there is no per-task opt-in.
+
+- Default lens set is `correctness`, `security`, `contract`, `simplification`, `altitude`. Small diffs (< 200 LOC, 1–2 files) may drop to any 3 of those. Large or contract-touching diffs (> 500 LOC, or auth/persistence/concurrency) must use 5.
+- For Formation Step 7 executor delegation, the HQ is responsible for invoking the executor `N` times with per-lens prompts and merging the results into one schema-conformant JSON. Set the merged output's top-level `lens_count` to `N`. A single 1-shot call to an external reviewer is NOT enough.
+- When merging N single-lens outputs, dedup findings by `(file, line, summary)` if the same defect surfaces across lenses; keep the highest severity when they disagree.
+
+### Adversarial countersign for clean reviews (Layer 3)
+
+Multi-perspective review (Layer 2) protects against a single reviewer taking a shortcut, but N lenses of *the same reviewer* still share a blind spot: the reviewer's model, its training cutoff, its habit of trusting patterns it has seen before. When the primary review comes back with no `high` or `medium` finding, that "clean" verdict is the moment to worry — real problems can survive same-reviewer redundancy and only surface under a genuinely different eye.
+
+Layer 3 runs an **adversarial countersign** on any clean primary review: a second reviewer, ideally from a different vendor or model family, re-reviews the same diff with the mandate "find what the primary missed." Only when the countersign also comes back clean is the sentinel flipped from `countersign=none` to `countersign=clean`. If the countersign surfaces any `high` or `medium` finding the primary missed, `vdgg_review_countersign` returns a failure that the caller must treat as a failed review — go to reflection (Step 6-R) rather than advancing.
+
+Pipeline enforcement — `vdgg_review_run` marks the sentinel with `countersign_required=1` whenever the primary review returns no `high`/`medium` finding, AND when `--review-output` is omitted (legacy backward-compat path). The PreToolUse hook calls `_vdgg_review_gate_ready` before opening verified and refuses to advance while `countersign_required=1 && countersign != clean`. Skipping `vdgg_review_countersign` on a clean primary — or trying to open the gate via legacy `vdgg_review_run true` — is a hard block. `_vdgg_write_review_sentinel` also refuses direct calls that lack the one-shot `_VDGG_WRITE_REVIEW_SENTINEL_AUTHORIZED=1` breadcrumb.
+
+- Trigger condition: primary findings empty OR all `low`. A primary with any `high`/`medium` already flagged problems; the helper no-ops there and the sentinel records `countersign_required=0`. (Codex edition intentionally omits the CC-only simplify path exemption — no simplify skill in this runtime.)
+- Reviewer selection: the countersign should come from a different vendor or model family than the primary whenever the Formation makes that possible. A same-family countersign satisfies the mechanism but weakens the guarantee — record when this happens in `progress.md` so future rounds know to escalate.
+- The countersign output must satisfy Layer 1 (schema) and Layer 2 (`lens_count ≥ 3`) on its own — a countersign that returns prose or a single-lens JSON is a failed countersign, not a passed one.
+
 ### Review prompts must request concrete fixes, not only findings
 
 Every Step 7 review prompt — self-review, Formation Step 7 executor calls, external `vdgg_review_run` reviewers, and MAGI verdicts on subjective artifacts — MUST require the reviewer to include the concrete fix for each finding alongside the problem statement. Findings without a proposed fix push the implementer back into guessing what the reviewer meant, which is the shape past regressions have taken. This is the default; there is no per-task opt-in.

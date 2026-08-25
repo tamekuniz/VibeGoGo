@@ -4,6 +4,12 @@
 
 set -euo pipefail
 
+# vdgg-state.sh is sourced LAZILY inside the simplify-sentinel branch below,
+# not at top level. This hook fires on every tool call in a VDGG-active repo;
+# ~99% of those calls do not touch the state-helper functions, so pulling the
+# full state machine at top level would pay the parse cost on every call for
+# the 1% simplify-skill path.
+
 INPUT=$(cat)
 
 if ! command -v jq >/dev/null 2>&1; then
@@ -97,12 +103,23 @@ if [ "$PHASE" = "testing" ] && [ "$TOOL_NAME" = "Skill" ]; then
         SENTINEL_FILE="$CWD/.claude/.vdgg-simplify-sentinel-${VDGG_ID}-${LOOP_COUNT}"
         if [ ! -f "$SENTINEL_FILE" ]; then
             STARTED_AT=$(date -u +%FT%TZ)
-            cat > "$SENTINEL_FILE" <<EOF
-started=1
-started_at=${STARTED_AT}
-modified=0
-modified_files=
-EOF
+            # Lazy source: only the simplify-sentinel path needs state helpers.
+            _VDGG_HOOK_SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)
+            # shellcheck source=vdgg-state.sh
+            . "${_VDGG_HOOK_SCRIPT_DIR}/vdgg-state.sh"
+            # Layer 4: simplify skill runs 4-5 angle finders in parallel, so
+            # lens_count=4 and schema_validated=1. countersign=none because
+            # simplify's internal parallelism already provides Layer-3-grade
+            # perspective diversity. review_output_hash stays empty here — the
+            # simplify skill does not emit a merged JSON we could hash.
+            # simplify path is Layer 3 exempt (its Phase 1 already fans out
+            # across 4–5 angle finders in-band), so countersign_required=0.
+            # schema_validated=0 because the simplify sentinel is not backed
+            # by a Layer 1 JSON schema check — the invariant validator would
+            # reject schema=1 with an empty review_output_hash, so we keep
+            # this path honest and mark it as legacy-style shape (lens_count
+            # empty, hash empty, schema=0).
+            _vdgg_render_sentinel_body "$STARTED_AT" 0 "" "" "" none 0 0 > "$SENTINEL_FILE"
         fi
         exit 0
     fi
