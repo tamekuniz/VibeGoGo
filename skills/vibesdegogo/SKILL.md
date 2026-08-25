@@ -451,6 +451,20 @@ It writes the review sentinel only when the command exits 0, and it is the docum
 
 For a **subjective artifact** (docs, copy, naming, design — where quality is a judgment, not something a test can decide), the review gate can be the `MAGI` skill when it is installed: run MAGI as the review, write its verdict line to `tasks/vdgg/{id}/magi-verdict.md`, and record the gate with `vdgg_review_run grep -q '^MAGI判定: 可決' tasks/vdgg/{id}/magi-verdict.md`, so a deliberation recorded as 未達 cannot open it. The verdict file is written by the agent, so this checks the record, not the deliberation itself. If MAGI is not installed, skip it and use the standard `simplify`/review gate above. MAGI judges desirability, not code correctness — correctness still rides on tests and `simplify`.
 
+### Review prompts must request concrete fixes, not only findings
+
+Every review prompt — simplify angle-finder agents, Formation Step 7 executor calls, external `vdgg_review_run` reviewers, and MAGI verdicts on subjective artifacts — MUST require the reviewer to include the concrete fix for each finding alongside the problem statement. Findings without a proposed fix push the implementer back into guessing what the reviewer meant, which is the shape past regressions have taken. This is the default; there is no per-task opt-in.
+
+When writing the prompt, require each finding to carry:
+
+- `file`, `line` — where the problem is.
+- `severity` — `high` / `medium` / `low` (mandatory; see the severity-based response section below).
+- `summary` — one sentence stating the problem.
+- `fix` — a concrete code snippet, unified diff, or step-by-step instruction that resolves it. "Consider X" / "may want to Y" is not acceptable — the reviewer must commit to a specific change. If the reviewer genuinely cannot propose a fix, write `fix: unknown, needs investigation` so the implementer treats it as a research task instead of a guess.
+- `cost` — reviewer's estimate of implementation effort (low / medium / high), used by the implementer to plan the fix batch.
+
+The implementer still owns the final decision (accept, skip, or defer to `followup.md`); the reviewer's job is to make that decision cheap by handing over a fix the implementer can adopt, adapt, or reject on concrete grounds.
+
 ### simplify subagent consolidation
 
 The simplify skill's default Phase 1 (5 parallel angle finders, up to 8 candidates each) is the right call when ANY of these hold:
