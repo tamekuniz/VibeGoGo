@@ -406,7 +406,8 @@ _vdgg_check_step_transition() {
 _vdgg_formation_keys() {
   printf '%s\n' \
     STEP_0_AI STEP_1_AI STEP_2_AI STEP_3_AI STEP_4_AI STEP_5_AI \
-    STEP_6_AI STEP_6R_AI STEP_7_AI STEP_8_AI STEP_9_AI STEP_0_GRILL_AI
+    STEP_6_AI STEP_6R_AI STEP_7_AI STEP_8_AI STEP_9_AI STEP_0_GRILL_AI \
+    MAGI_MELCHIOR_AI MAGI_BALTHASAR_AI MAGI_CASPER_AI
 }
 
 _vdgg_name_is_safe() {
@@ -416,6 +417,7 @@ _vdgg_name_is_safe() {
 _vdgg_step_key_is_valid() {
   case "$1" in
     STEP_0_AI|STEP_1_AI|STEP_2_AI|STEP_3_AI|STEP_4_AI|STEP_5_AI|STEP_6_AI|STEP_6R_AI|STEP_7_AI|STEP_8_AI|STEP_9_AI|STEP_0_GRILL_AI) return 0 ;;
+    MAGI_MELCHIOR_AI|MAGI_BALTHASAR_AI|MAGI_CASPER_AI) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -451,6 +453,9 @@ _vdgg_seat_to_key() {
     8) echo STEP_8_AI ;;
     9) echo STEP_9_AI ;;
     0G|0g|[Gg][Rr][Ii][Ll][Ll]) echo STEP_0_GRILL_AI ;;
+    [Mm][Aa][Gg][Ii]-[Mm]) echo MAGI_MELCHIOR_AI ;;
+    [Mm][Aa][Gg][Ii]-[Bb]) echo MAGI_BALTHASAR_AI ;;
+    [Mm][Aa][Gg][Ii]-[Cc]) echo MAGI_CASPER_AI ;;
     *) return 1 ;;
   esac
 }
@@ -602,7 +607,7 @@ _vdgg_validate_formation_file() {
       key="*"
     else
       key=$(_vdgg_seat_to_key "$seat") || {
-        echo "vdgg-formation: unknown seat in $file: $seat (valid: 0, 0G, 1, 2, 3, 4, 5, 6, 6R, 7, 8, 9, *)" >&2
+        echo "vdgg-formation: unknown seat in $file: $seat (valid: 0, 0G, 1, 2, 3, 4, 5, 6, 6R, 7, 8, 9, MAGI-M, MAGI-B, MAGI-C, *)" >&2
         return 1
       }
     fi
