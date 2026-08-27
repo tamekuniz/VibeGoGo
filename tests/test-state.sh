@@ -183,3 +183,49 @@ STATUS=$?
 set -e
 assert_exit_code 1 "$STATUS" "state init refuses an invalid formation"
 assert_file_not_exists ".claude/.vdgg-active" "state stays unarmed for an invalid formation"
+
+# --- MAGI seats: MELCHIOR / BALTHASAR / CASPER are addressable in formation --
+cat > "$VDGG_CONFIG_DIR/formations/magi-seats.conf" <<'CONF'
+0: primary
+3: qwen
+* : sonnet5
+MAGI-M: qwen
+magi-b: sonnet5
+Magi-C: primary
+CONF
+
+set +e
+vdgg_formation_preflight magi-seats >/tmp/vdgg-test-magi-formation.out 2>/tmp/vdgg-test-magi-formation.err
+STATUS=$?
+set -e
+assert_exit_code 0 "$STATUS" "formation with MAGI seats is accepted"
+assert_eq "qwen" "$(vdgg_formation_resolve MAGI_MELCHIOR_AI magi-seats)" "MAGI-M resolves to its executor"
+assert_eq "sonnet5" "$(vdgg_formation_resolve MAGI_BALTHASAR_AI magi-seats)" "MAGI-B is case-insensitive (magi-b)"
+assert_eq "inline" "$(vdgg_formation_resolve MAGI_CASPER_AI magi-seats)" "primary/inline on MAGI-C resolves to inline"
+
+# Every casing is accepted (proves the character-class pattern, not a
+# hand-picked alternation), matching the SKILL.md "case-insensitive" promise.
+printf 'MaGi-M: qwen\n' > "$VDGG_CONFIG_DIR/formations/magi-mixedcase.conf"
+set +e
+vdgg_formation_preflight magi-mixedcase >/dev/null 2>&1
+STATUS=$?
+set -e
+assert_exit_code 0 "$STATUS" "MAGI seats accept arbitrary casing (MaGi-M)"
+assert_eq "qwen" "$(vdgg_formation_resolve MAGI_MELCHIOR_AI magi-mixedcase)" "MaGi-M resolves to MAGI_MELCHIOR_AI"
+
+# MAGI seats stay inline when not listed, even under a wildcard.
+cat > "$VDGG_CONFIG_DIR/formations/magi-wildcard.conf" <<'CONF'
+* : sonnet5
+CONF
+assert_eq "inline" "$(vdgg_formation_resolve MAGI_MELCHIOR_AI magi-wildcard)" "MAGI-M is outside the * wildcard set"
+assert_eq "inline" "$(vdgg_formation_resolve MAGI_BALTHASAR_AI magi-wildcard)" "MAGI-B is outside the * wildcard set"
+assert_eq "inline" "$(vdgg_formation_resolve MAGI_CASPER_AI magi-wildcard)" "MAGI-C is outside the * wildcard set"
+
+# Every MAGI key is validated during preflight, so an unknown executor on any
+# of them is caught before state init writes anything.
+printf 'MAGI-B: unknown-magi-executor\n' > "$VDGG_CONFIG_DIR/formations/bad-magi.conf"
+set +e
+vdgg_formation_preflight bad-magi >/dev/null 2>&1
+STATUS=$?
+set -e
+assert_exit_code 1 "$STATUS" "unknown executor on a MAGI seat is rejected"

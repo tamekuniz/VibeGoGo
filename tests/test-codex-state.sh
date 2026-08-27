@@ -311,6 +311,43 @@ vdgg_formation_preflight broken >/tmp/vdgg-test-formation-broken.out 2>/tmp/vdgg
 BROKEN_RC=$?
 assert_exit_code 1 "$BROKEN_RC" "Codex rejects a non-executable executor command"
 
+# --- MAGI seats: MELCHIOR / BALTHASAR / CASPER are addressable in formation --
+cat > "$VDGG_CONFIG_DIR/formations/magi-seats.conf" <<'CONF'
+0: primary
+3: qwen
+* : sonnet5
+MAGI-M: qwen
+magi-b: sonnet5
+Magi-C: primary
+CONF
+vdgg_formation_preflight magi-seats >/tmp/vdgg-test-formation-magi.out 2>/tmp/vdgg-test-formation-magi.err
+MAGI_RC=$?
+assert_exit_code 0 "$MAGI_RC" "Codex accepts a formation with MAGI seats"
+assert_eq "qwen" "$(vdgg_formation_resolve MAGI_MELCHIOR_AI magi-seats)" "Codex resolves MAGI-M to its executor"
+assert_eq "sonnet5" "$(vdgg_formation_resolve MAGI_BALTHASAR_AI magi-seats)" "Codex handles MAGI seat case-insensitivity (magi-b)"
+assert_eq "inline" "$(vdgg_formation_resolve MAGI_CASPER_AI magi-seats)" "Codex resolves primary on MAGI-C to inline"
+
+# Every casing is accepted (proves the character-class pattern), matching the
+# SKILL.md "case-insensitive" promise.
+printf 'MaGi-M: qwen\n' > "$VDGG_CONFIG_DIR/formations/magi-mixedcase.conf"
+vdgg_formation_preflight magi-mixedcase >/dev/null 2>&1
+MAGI_MIXED_RC=$?
+assert_exit_code 0 "$MAGI_MIXED_RC" "Codex MAGI seats accept arbitrary casing (MaGi-M)"
+assert_eq "qwen" "$(vdgg_formation_resolve MAGI_MELCHIOR_AI magi-mixedcase)" "Codex MaGi-M resolves to MAGI_MELCHIOR_AI"
+
+# MAGI seats stay inline when not listed, even under a wildcard.
+cat > "$VDGG_CONFIG_DIR/formations/magi-wildcard.conf" <<'CONF'
+* : sonnet5
+CONF
+assert_eq "inline" "$(vdgg_formation_resolve MAGI_MELCHIOR_AI magi-wildcard)" "Codex keeps MAGI-M outside the * wildcard"
+assert_eq "inline" "$(vdgg_formation_resolve MAGI_BALTHASAR_AI magi-wildcard)" "Codex keeps MAGI-B outside the * wildcard"
+assert_eq "inline" "$(vdgg_formation_resolve MAGI_CASPER_AI magi-wildcard)" "Codex keeps MAGI-C outside the * wildcard"
+
+printf 'MAGI-B: unknown-magi-executor\n' > "$VDGG_CONFIG_DIR/formations/bad-magi.conf"
+vdgg_formation_preflight bad-magi >/tmp/vdgg-test-formation-bad-magi.out 2>/tmp/vdgg-test-formation-bad-magi.err
+BAD_MAGI_RC=$?
+assert_exit_code 1 "$BAD_MAGI_RC" "Codex rejects an unknown executor on a MAGI seat"
+
 cat > "$TMPDIR_VDGG/bad-grill.md" <<'EOF'
 ## Goal
 goal
