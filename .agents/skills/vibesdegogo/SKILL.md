@@ -267,7 +267,12 @@ Write `tasks/vdgg/{id}/requirements.md`:
 
 ## Acceptance criteria
 ...
+
+## Lessons Applied
+...
 ```
+
+The `## Lessons Applied` heading is the earliest structural point where user-memory / user `AGENTS.md` / AIB lessons still shape the requirements themselves. List each applicable item with a one-line "why relevant"; write `None applicable` when nothing fits — the heading and a non-empty body are enforced by the hook, so the consultation is never silently skipped. This section is distinct from Step 3's `## Lessons applied` heading in `investigation.md`, which records per-repo `tasks/vdgg/*/lessons.md` findings that shape the *implementation* rather than the requirements; both layers complement each other.
 
 Advance:
 

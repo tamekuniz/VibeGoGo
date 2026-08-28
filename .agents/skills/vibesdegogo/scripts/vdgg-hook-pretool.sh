@@ -253,6 +253,16 @@ fi
 if [ "$TOOL_NAME" = "Bash" ] && [ "$PHASE" = "requirements" ]; then
   if printf '%s' "$COMMAND" | grep -qE 'vdgg_state_(advance|loop|write)[[:space:]]+3[[:space:]]+investigating'; then
     [ -f "$TASKS_DIR/requirements.md" ] || block "requirements.md is required before investigation."
+    # The '## Lessons Applied' heading with a non-empty body is enforced at the
+    # earliest structural point where user-memory / AIB lessons still shape the
+    # requirements themselves, so the consultation can never be silently skipped.
+    awk '
+      /^## Lessons Applied[[:space:]]*$/ { in_section=1; next }
+      in_section && /^## / { in_section=0 }
+      in_section && /[^[:space:]]/ { found=1 }
+      END { exit found ? 0 : 1 }
+    ' "$TASKS_DIR/requirements.md" \
+      || block "requirements.md must include a '## Lessons Applied' heading with a non-empty body (write 'None applicable' when nothing fits)."
   fi
 fi
 
