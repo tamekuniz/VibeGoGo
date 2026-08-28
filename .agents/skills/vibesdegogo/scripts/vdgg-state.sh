@@ -835,8 +835,7 @@ EOF
     # `VAR=value` prefix on an `if` condition silently drops assignments after
     # the first line. The `if`-wrapper also suppresses errexit for this
     # specific command so a failing spec never trips the caller's set state.
-    _ai="$_VDGG_SEAT_NAME"; _model="$_VDGG_SEAT_MODEL"; _effort="$_VDGG_SEAT_EFFORT"
-    if env "VDGG_EXECUTOR_FORMATION=$formation" "VDGG_EXECUTOR_AI=$_ai" "VDGG_EXECUTOR_MODEL=$_model" "VDGG_EXECUTOR_EFFORT=$_effort" "VDGG_EXECUTOR_STEP=$step_key" "VDGG_EXECUTOR_INPUT=$input_file" "VDGG_EXECUTOR_OUTPUT=$output_file" "$command"; then
+    if env "VDGG_EXECUTOR_FORMATION=$formation" "VDGG_EXECUTOR_AI=$_VDGG_SEAT_NAME" "VDGG_EXECUTOR_MODEL=$_VDGG_SEAT_MODEL" "VDGG_EXECUTOR_EFFORT=$_VDGG_SEAT_EFFORT" "VDGG_EXECUTOR_STEP=$step_key" "VDGG_EXECUTOR_INPUT=$input_file" "VDGG_EXECUTOR_OUTPUT=$output_file" "$command"; then
       status=0
     else
       status=$?
