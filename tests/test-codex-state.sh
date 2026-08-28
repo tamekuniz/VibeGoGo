@@ -349,17 +349,8 @@ BAD_MAGI_RC=$?
 assert_exit_code 1 "$BAD_MAGI_RC" "Codex rejects an unknown executor on a MAGI seat"
 
 # --- Codex mirror: fallback list on the '|' separator ------------------------
-mkdir -p "$TMPDIR_VDGG/bin"
-EXEC_OK_CX="$TMPDIR_VDGG/bin/exec-ok"
-EXEC_FAIL_CX="$TMPDIR_VDGG/bin/exec-fail"
-EXEC_EMPTY_CX="$TMPDIR_VDGG/bin/exec-empty"
-printf '#!/bin/sh\nprintf "ran-%%s\\n" "$VDGG_EXECUTOR_AI" > "$VDGG_EXECUTOR_OUTPUT"\n' > "$EXEC_OK_CX"
-printf '#!/bin/sh\nexit 3\n' > "$EXEC_FAIL_CX"
-printf '#!/bin/sh\n: > "$VDGG_EXECUTOR_OUTPUT"\n' > "$EXEC_EMPTY_CX"
-chmod +x "$EXEC_OK_CX" "$EXEC_FAIL_CX" "$EXEC_EMPTY_CX"
-printf 'COMMAND=%s\n' "$EXEC_OK_CX" > "$VDGG_CONFIG_DIR/executors/okexec.conf"
-printf 'COMMAND=%s\n' "$EXEC_FAIL_CX" > "$VDGG_CONFIG_DIR/executors/failexec.conf"
-printf 'COMMAND=%s\n' "$EXEC_EMPTY_CX" > "$VDGG_CONFIG_DIR/executors/emptyexec.conf"
+. "$ROOT/tests/lib/exec-fixtures.sh"
+vdgg_install_exec_fixtures "$TMPDIR_VDGG/bin" "$VDGG_CONFIG_DIR"
 
 cat > "$VDGG_CONFIG_DIR/formations/fallback-3.conf" <<'CONF'
 3: okexec | failexec | okexec

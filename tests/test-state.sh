@@ -234,17 +234,8 @@ assert_exit_code 1 "$STATUS" "unknown executor on a MAGI seat is rejected"
 # A seat can list up to 5 space-separated specs joined by '|'; the resolver
 # returns the first, `_all` returns each in order, and both preflight and
 # executor_run walk the list end-to-end.
-mkdir -p "$TMPDIR_VDGG/bin"
-EXEC_OK="$TMPDIR_VDGG/bin/exec-ok"
-EXEC_FAIL="$TMPDIR_VDGG/bin/exec-fail"
-EXEC_EMPTY="$TMPDIR_VDGG/bin/exec-empty"
-printf '#!/bin/sh\nprintf "ran-%%s\\n" "$VDGG_EXECUTOR_AI" > "$VDGG_EXECUTOR_OUTPUT"\n' > "$EXEC_OK"
-printf '#!/bin/sh\nexit 3\n' > "$EXEC_FAIL"
-printf '#!/bin/sh\n: > "$VDGG_EXECUTOR_OUTPUT"\n' > "$EXEC_EMPTY"
-chmod +x "$EXEC_OK" "$EXEC_FAIL" "$EXEC_EMPTY"
-printf 'COMMAND=%s\n' "$EXEC_OK" > "$VDGG_CONFIG_DIR/executors/okexec.conf"
-printf 'COMMAND=%s\n' "$EXEC_FAIL" > "$VDGG_CONFIG_DIR/executors/failexec.conf"
-printf 'COMMAND=%s\n' "$EXEC_EMPTY" > "$VDGG_CONFIG_DIR/executors/emptyexec.conf"
+. "$ROOT/tests/lib/exec-fixtures.sh"
+vdgg_install_exec_fixtures "$TMPDIR_VDGG/bin" "$VDGG_CONFIG_DIR"
 
 # 1) resolve_all returns each spec, resolve returns the first, backward compat.
 cat > "$VDGG_CONFIG_DIR/formations/fallback-3.conf" <<'CONF'
