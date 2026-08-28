@@ -482,13 +482,61 @@ _vdgg_parse_seat_value() {
   esac
 }
 
+# Split a raw seat value into one spec per line on the '|' fallback separator,
+# trimming per-spec whitespace. Empty specs are emitted verbatim so the caller
+# can surface them as an explicit misconfiguration rather than silently ignoring
+# a stray '|| '.
+_vdgg_split_specs() {
+  awk -v s="$1" 'BEGIN {
+    n = split(s, a, "|")
+    for (i = 1; i <= n; i++) {
+      spec = a[i]
+      sub(/^[[:space:]]+/, "", spec)
+      sub(/[[:space:]]+$/, "", spec)
+      print spec
+    }
+  }'
+}
+
 # Every seat accepts every value: any step can name the model it should run on.
 # Seat 0 and Grill Me are conversational, so a bundled one-shot wrapper there
 # answers in a single pass instead of holding a dialogue — that is a runtime
 # consequence of the choice, not a reason to reject the configuration.
+#
+# A value may be a single spec ("codex high") or a '|'-separated fallback list
+# ("codex high | fable5 | sonnet5"). Each spec is validated independently; the
+# list has a hard ceiling of 5 specs to keep a misconfigured file from cascading
+# forever, and 'inline'/'primary' is only allowed as the sole spec, never in the
+# tail — a fallback list must name external executors to be actionable.
 _vdgg_check_seat_value() {
-  local key="$1" value="$2"
-  _vdgg_parse_seat_value "$value" "$key" || return 1
+  local key="$1" value="$2" spec count=0
+  # `while read` from a here-document preserves middle-empty lines that a
+  # newline-IFS array split would collapse (bash treats a whitespace IFS as
+  # a run separator), so an empty spec inside `okexec ||  okexec` still gets
+  # surfaced as an explicit misconfiguration rather than being silently
+  # dropped. The `|| [ -n "$spec" ]` guard catches an unterminated final line.
+  while IFS= read -r spec || [ -n "$spec" ]; do
+    count=$((count + 1))
+    if [ -z "$spec" ]; then
+      echo "vdgg-formation: empty spec in fallback list for $key" >&2
+      return 1
+    fi
+    if [ "$count" -gt 5 ]; then
+      echo "vdgg-formation: too many fallback specs for $key (max 5): $value" >&2
+      return 1
+    fi
+    _vdgg_parse_seat_value "$spec" "$key" || return 1
+    if [ "$count" -ge 2 ] && [ "$_VDGG_SEAT_NAME" = "inline" ]; then
+      echo "vdgg-formation: 'inline'/'primary' can only appear as the sole spec, not in a fallback list ($key): $value" >&2
+      return 1
+    fi
+  done <<EOF
+$(_vdgg_split_specs "$value")
+EOF
+  [ "$count" -ge 1 ] || {
+    echo "vdgg-formation: empty value for $key" >&2
+    return 1
+  }
 }
 
 _vdgg_validate_formation_file() {
@@ -566,11 +614,9 @@ _vdgg_formation_value() {
   elif [ -n "$wildcard" ] && _vdgg_key_in_wildcard "$step_key"; then
     result="$wildcard"
   fi
-  # "primary" is the file-facing word for "the session's own model"; every
-  # caller downstream already understands "inline", so normalize here.
-  case "$result" in
-    primary) result="inline" ;;
-  esac
+  # The raw value flows through unchanged so multi-spec fallback lists survive
+  # the round-trip. The 'primary' → 'inline' normalization happens per-spec in
+  # vdgg_formation_resolve_all, which is the single caller that reads specs.
   printf '%s\n' "$result"
 }
 
@@ -660,28 +706,56 @@ vdgg_formation_current() {
 }
 
 vdgg_formation_preflight() {
-  local formation="${1:-}" step_key ai
+  local formation="${1:-}" step_key raw spec
   [ -n "$formation" ] || formation=$(vdgg_formation_current)
   [ -n "$formation" ] || {
     echo "vdgg-formation: no formation selected" >&2
     return 1
   }
   _vdgg_validate_formation_file "$formation" || return 1
+  # Every spec of every listed seat must resolve to a real command. Fallback
+  # lists are exercised end-to-end here so a stale executor conf surfaces at
+  # formation-selection time, not mid-run when we would silently cascade past
+  # a spec that never had a chance.
   for step_key in $(_vdgg_formation_keys); do
-    ai=$(_vdgg_formation_value "$formation" "$step_key")
-    [ "$ai" = "inline" ] || _vdgg_seat_command "$ai" "$step_key" >/dev/null || return 1
+    raw=$(_vdgg_formation_value "$formation" "$step_key")
+    while IFS= read -r spec || [ -n "$spec" ]; do
+      [ -n "$spec" ] || continue
+      case "$spec" in
+        primary|inline) continue ;;
+      esac
+      _vdgg_seat_command "$spec" "$step_key" >/dev/null || return 1
+    done <<EOF
+$(_vdgg_split_specs "$raw")
+EOF
   done
 }
 
-vdgg_formation_resolve() {
-  local step_key="${1:-}" formation="${2:-}"
+vdgg_formation_resolve_all() {
+  local step_key="${1:-}" formation="${2:-}" raw spec
   _vdgg_step_key_is_valid "$step_key" || {
     echo "vdgg-formation: invalid step key: $step_key" >&2
     return 1
   }
   [ -n "$formation" ] || formation=$(vdgg_formation_current)
   vdgg_formation_preflight "$formation" || return 1
-  _vdgg_formation_value "$formation" "$step_key"
+  raw=$(_vdgg_formation_value "$formation" "$step_key")
+  while IFS= read -r spec || [ -n "$spec" ]; do
+    [ -n "$spec" ] || continue
+    case "$spec" in
+      primary) printf 'inline\n' ;;
+      *) printf '%s\n' "$spec" ;;
+    esac
+  done <<EOF
+$(_vdgg_split_specs "$raw")
+EOF
+}
+
+# vdgg_formation_resolve keeps the single-spec contract: existing callers
+# (documentation snippets, downstream tooling) receive the primary spec, and
+# the fallback list is opaque to them.
+vdgg_formation_resolve() {
+  vdgg_formation_resolve_all "$@" | head -n 1
 }
 
 vdgg_grill_validate_output() {
@@ -705,7 +779,8 @@ vdgg_grill_validate_output() {
 
 vdgg_executor_run() {
   local step_key="${1:-}" input_file="${2:-}" output_file="${3:-}"
-  local formation ai command
+  local formation spec command status total idx=0 last_status=1
+  local -a specs=()
   _vdgg_step_key_is_valid "$step_key" || {
     echo "vdgg-formation: invalid step key: $step_key" >&2
     return 1
@@ -723,28 +798,72 @@ vdgg_executor_run() {
     return 1
   fi
   formation=$(vdgg_formation_current)
-  ai=$(vdgg_formation_resolve "$step_key" "$formation") || return 1
-  [ "$ai" != "inline" ] || {
-    echo "vdgg-formation: $step_key is assigned to inline; no external executor was run" >&2
+  local specs_blob s
+  specs_blob=$(vdgg_formation_resolve_all "$step_key" "$formation") || return 1
+  while IFS= read -r s || [ -n "$s" ]; do
+    [ -n "$s" ] && specs+=("$s")
+  done <<EOF
+$specs_blob
+EOF
+  total=${#specs[@]}
+  [ "$total" -ge 1 ] || {
+    echo "vdgg-formation: no specs resolved for $step_key" >&2
     return 1
   }
-  command=$(_vdgg_seat_command "$ai" "$step_key") || return 1
-  _vdgg_parse_seat_value "$ai" "$step_key" || return 1
-  VDGG_EXECUTOR_FORMATION="$formation" \
-  VDGG_EXECUTOR_AI="$_VDGG_SEAT_NAME" \
-  VDGG_EXECUTOR_MODEL="$_VDGG_SEAT_MODEL" \
-  VDGG_EXECUTOR_EFFORT="$_VDGG_SEAT_EFFORT" \
-  VDGG_EXECUTOR_STEP="$step_key" \
-  VDGG_EXECUTOR_INPUT="$input_file" \
-  VDGG_EXECUTOR_OUTPUT="$output_file" \
-    "$command" || return $?
-  if [ -n "$output_file" ] && [ ! -s "$output_file" ]; then
-    echo "vdgg-formation: executor did not create output: $output_file" >&2
+  # An inline sole-spec is rejected up front: the resolve chain guarantees that
+  # 'inline' only appears as position 1 with total=1 (the preflight blocks it in
+  # the tail), so this single check covers every configuration.
+  if [ "${specs[0]}" = "inline" ]; then
+    echo "vdgg-formation: $step_key is assigned to inline; no external executor was run" >&2
     return 1
   fi
-  if [ "$step_key" = "STEP_0_GRILL_AI" ]; then
-    vdgg_grill_validate_output "$output_file" || return 1
-  fi
+  for (( idx=0; idx < total; idx++ )); do
+    spec="${specs[$idx]}"
+    if ! command=$(_vdgg_seat_command "$spec" "$step_key"); then
+      last_status=1
+      echo "vdgg-formation: spec $((idx+1))/$total ($spec) unresolvable; trying next" >&2
+      continue
+    fi
+    _vdgg_parse_seat_value "$spec" "$step_key" || { last_status=1; continue; }
+    # Between attempts, wipe any partial output from the previous try so an
+    # earlier crash cannot fake success on the emptiness check below.
+    if [ -n "$output_file" ] && [ -e "$output_file" ]; then
+      rm -f "$output_file"
+    fi
+    # Env prefix is built via env(1) with each assignment on its own argv, kept
+    # on a single line to sidestep a bash 3.2 behavior where a multi-line
+    # `VAR=value` prefix on an `if` condition silently drops assignments after
+    # the first line. The `if`-wrapper also suppresses errexit for this
+    # specific command so a failing spec never trips the caller's set state.
+    _ai="$_VDGG_SEAT_NAME"; _model="$_VDGG_SEAT_MODEL"; _effort="$_VDGG_SEAT_EFFORT"
+    if env "VDGG_EXECUTOR_FORMATION=$formation" "VDGG_EXECUTOR_AI=$_ai" "VDGG_EXECUTOR_MODEL=$_model" "VDGG_EXECUTOR_EFFORT=$_effort" "VDGG_EXECUTOR_STEP=$step_key" "VDGG_EXECUTOR_INPUT=$input_file" "VDGG_EXECUTOR_OUTPUT=$output_file" "$command"; then
+      status=0
+    else
+      status=$?
+    fi
+    if [ "$status" -ne 0 ]; then
+      last_status=$status
+      echo "vdgg-formation: spec $((idx+1))/$total ($spec) failed: exit $status; trying next" >&2
+      continue
+    fi
+    if [ -n "$output_file" ] && [ ! -s "$output_file" ]; then
+      last_status=1
+      echo "vdgg-formation: spec $((idx+1))/$total ($spec) produced no output; trying next" >&2
+      continue
+    fi
+    if [ "$step_key" = "STEP_0_GRILL_AI" ]; then
+      # Grill Me: validator failure is a semantic mismatch, not a transient
+      # transport failure, so it must surface directly rather than trigger the
+      # next fallback (which would silently paper over a real content bug).
+      vdgg_grill_validate_output "$output_file" || return 1
+    fi
+    if [ "$total" -gt 1 ]; then
+      echo "vdgg-formation: spec $((idx+1))/$total ($spec) succeeded" >&2
+    fi
+    return 0
+  done
+  echo "vdgg-formation: all $total fallback spec(s) failed for $step_key" >&2
+  return "$last_status"
 }
 
 vdgg_state_init() {
