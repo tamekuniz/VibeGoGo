@@ -390,3 +390,89 @@ write_ack_flag
 STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"# [Error Acknowledged] retrying with fixed flag\necho ok"}}')
 assert_exit_code 0 "$STATUS" "ack gate: marker in the command unblocks"
 assert_file_not_exists "$TMPDIR_VDGG/.claude/.vdgg-error-pending" "ack gate: flag is consumed on acknowledgement"
+
+# --- Step 2 -> 3 gate: '## Lessons Applied' heading with a non-empty body ----
+# The hook enforces the section at the earliest structural point where user-memory
+# / AIB lessons still shape the requirements. Missing heading or empty body must
+# block Step 3; a heading with any non-empty body passes.
+LESSONS_REQ="$TMPDIR_VDGG/tasks/vdgg/test-id/requirements.md"
+ADVANCE_CMD='# [VibesDeGoGo! Step 3 Start] step=3, phase=investigating, loop=0\nvdgg_state_advance 3 investigating'
+
+# Case 1: requirements.md without a '## Lessons Applied' heading -> blocked.
+write_state requirements 2
+cat > "$LESSONS_REQ" <<'EOF'
+## Goal
+goal
+
+## Constraints
+none
+
+## Acceptance criteria
+none
+EOF
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"'"$ADVANCE_CMD"'"}}')
+assert_exit_code 2 "$STATUS" "Step 3 gate: missing '## Lessons Applied' heading is blocked"
+
+# Case 2: '## Lessons Applied' with a non-empty body -> allowed.
+write_state requirements 2
+cat > "$LESSONS_REQ" <<'EOF'
+## Goal
+goal
+
+## Constraints
+none
+
+## Acceptance criteria
+none
+
+## Lessons Applied
+None applicable
+EOF
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"'"$ADVANCE_CMD"'"}}')
+assert_exit_code 0 "$STATUS" "Step 3 gate: '## Lessons Applied' with non-empty body passes"
+
+# Case 3: '## Lessons Applied' with an empty body (only blank lines before EOF
+# or before the next heading) -> blocked. Prevents the "heading-only" escape
+# hatch where the writer taps the header but skips the actual review.
+write_state requirements 2
+cat > "$LESSONS_REQ" <<'EOF'
+## Goal
+goal
+
+## Constraints
+none
+
+## Acceptance criteria
+none
+
+## Lessons Applied
+
+
+EOF
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"'"$ADVANCE_CMD"'"}}')
+assert_exit_code 2 "$STATUS" "Step 3 gate: '## Lessons Applied' with an empty body is blocked"
+
+# Case 4: heading present but body is empty because a later '## ' heading
+# follows immediately (e.g. '## Notes' after a blank line) -> blocked. Catches
+# the misordering where Lessons Applied is written last but with no body before
+# a trailing section like '## Notes'.
+write_state requirements 2
+cat > "$LESSONS_REQ" <<'EOF'
+## Goal
+goal
+
+## Constraints
+none
+
+## Acceptance criteria
+none
+
+## Lessons Applied
+
+## Notes
+free-form
+EOF
+STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"'"$ADVANCE_CMD"'"}}')
+assert_exit_code 2 "$STATUS" "Step 3 gate: '## Lessons Applied' followed by another heading with no body between is blocked"
+
+rm -f "$LESSONS_REQ"

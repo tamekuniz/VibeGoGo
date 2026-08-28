@@ -327,12 +327,24 @@ case "$PHASE" in
                 exit 2
             fi
         fi
-        # requirements.md is mandatory before investigation starts.
+        # requirements.md is mandatory before investigation starts, and it must
+        # include a '## Lessons Applied' heading with a non-empty body so the
+        # session can never skip consulting user-memory / AIB lessons at the
+        # earliest structural point where they still shape the requirements.
         if [ "$PHASE" = "requirements" ] && [ "$TOOL_NAME" = "Bash" ]; then
             if echo "$COMMAND" | grep -qE 'vdgg_state_(advance|loop|write)[[:space:]]+3[[:space:]]+investigating([[:space:]]|$)'; then
                 REQ_FILE="${TASKS_DIR}/requirements.md"
                 if [ ! -f "$REQ_FILE" ]; then
                     echo "VibesDeGoGo! Step ${STEP} (requirements) [${VDGG_ID}]: requirements.md is required before investigation." >&2
+                    exit 2
+                fi
+                if ! awk '
+                    /^## Lessons Applied[[:space:]]*$/ { in_section=1; next }
+                    in_section && /^## / { in_section=0 }
+                    in_section && /[^[:space:]]/ { found=1 }
+                    END { exit found ? 0 : 1 }
+                ' "$REQ_FILE"; then
+                    echo "VibesDeGoGo! Step ${STEP} (requirements) [${VDGG_ID}]: requirements.md must include a '## Lessons Applied' heading with a non-empty body (write 'None applicable' when nothing fits)." >&2
                     exit 2
                 fi
             fi

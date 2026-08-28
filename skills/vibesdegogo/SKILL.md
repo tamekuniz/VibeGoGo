@@ -332,7 +332,12 @@ Write Step 0's agreed content to `tasks/vdgg/{id}/requirements.md` with exactly 
 
 ## Acceptance criteria
 ...
+
+## Lessons Applied
+...
 ```
+
+The `## Lessons Applied` heading is the earliest structural point where user-memory / user `CLAUDE.md` / AIB lessons still shape the requirements themselves. List each applicable item with a one-line "why relevant"; write `None applicable` when nothing fits — the heading and a non-empty body are enforced by the hook, so the consultation is never silently skipped. This section is distinct from Step 3's `## 8. Lessons applied` heading in `investigation.md`, which records per-repo `tasks/vdgg/*/lessons.md` findings that shape the *implementation* rather than the requirements; both layers complement each other.
 
 Then advance:
 
@@ -341,7 +346,7 @@ Then advance:
 vdgg_state_advance 2 requirements
 ```
 
-The hook blocks Step 3 until `requirements.md` exists.
+The hook blocks Step 3 until `requirements.md` exists **and** contains a `## Lessons Applied` heading with a non-empty body.
 
 ## Step 3: Deep Investigation
 
