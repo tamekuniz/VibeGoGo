@@ -348,6 +348,92 @@ vdgg_formation_preflight bad-magi >/tmp/vdgg-test-formation-bad-magi.out 2>/tmp/
 BAD_MAGI_RC=$?
 assert_exit_code 1 "$BAD_MAGI_RC" "Codex rejects an unknown executor on a MAGI seat"
 
+# --- Codex mirror: fallback list on the '|' separator ------------------------
+mkdir -p "$TMPDIR_VDGG/bin"
+EXEC_OK_CX="$TMPDIR_VDGG/bin/exec-ok"
+EXEC_FAIL_CX="$TMPDIR_VDGG/bin/exec-fail"
+EXEC_EMPTY_CX="$TMPDIR_VDGG/bin/exec-empty"
+printf '#!/bin/sh\nprintf "ran-%%s\\n" "$VDGG_EXECUTOR_AI" > "$VDGG_EXECUTOR_OUTPUT"\n' > "$EXEC_OK_CX"
+printf '#!/bin/sh\nexit 3\n' > "$EXEC_FAIL_CX"
+printf '#!/bin/sh\n: > "$VDGG_EXECUTOR_OUTPUT"\n' > "$EXEC_EMPTY_CX"
+chmod +x "$EXEC_OK_CX" "$EXEC_FAIL_CX" "$EXEC_EMPTY_CX"
+printf 'COMMAND=%s\n' "$EXEC_OK_CX" > "$VDGG_CONFIG_DIR/executors/okexec.conf"
+printf 'COMMAND=%s\n' "$EXEC_FAIL_CX" > "$VDGG_CONFIG_DIR/executors/failexec.conf"
+printf 'COMMAND=%s\n' "$EXEC_EMPTY_CX" > "$VDGG_CONFIG_DIR/executors/emptyexec.conf"
+
+cat > "$VDGG_CONFIG_DIR/formations/fallback-3.conf" <<'CONF'
+3: okexec | failexec | okexec
+CONF
+ALL_SPECS=$(vdgg_formation_resolve_all STEP_3_AI fallback-3 | tr '\n' ',')
+assert_eq "okexec,failexec,okexec," "$ALL_SPECS" "Codex resolve_all returns every spec"
+assert_eq "okexec" "$(vdgg_formation_resolve STEP_3_AI fallback-3)" "Codex resolve keeps the primary spec"
+
+printf '3: okexec | primary\n' > "$VDGG_CONFIG_DIR/formations/tail-primary.conf"
+vdgg_formation_preflight tail-primary >/dev/null 2>&1
+TAIL_RC=$?
+assert_exit_code 1 "$TAIL_RC" "Codex refuses 'primary' as a fallback tail spec"
+
+printf '3: okexec ||  okexec\n' > "$VDGG_CONFIG_DIR/formations/empty-mid.conf"
+vdgg_formation_preflight empty-mid >/dev/null 2>&1
+EMPTY_RC=$?
+assert_exit_code 1 "$EMPTY_RC" "Codex refuses an empty middle spec"
+
+printf '3: okexec | okexec | okexec | okexec | okexec | okexec\n' > "$VDGG_CONFIG_DIR/formations/too-long.conf"
+vdgg_formation_preflight too-long >/dev/null 2>&1
+TOOLONG_RC=$?
+assert_exit_code 1 "$TOOLONG_RC" "Codex refuses a fallback list longer than 5"
+
+printf '3: okexec | not-an-exec\n' > "$VDGG_CONFIG_DIR/formations/bad-tail.conf"
+vdgg_formation_preflight bad-tail >/dev/null 2>&1
+BADTAIL_RC=$?
+assert_exit_code 1 "$BADTAIL_RC" "Codex refuses an unknown executor in the tail"
+
+printf '3: okexec | failexec\n' > "$VDGG_CONFIG_DIR/formations/first-ok.conf"
+export VDGG_FORMATION=first-ok
+CX_FIRST_INPUT="$TMPDIR_VDGG/cx-first-input.md"
+CX_FIRST_OUTPUT="$TMPDIR_VDGG/cx-first-output.md"
+printf 'input\n' > "$CX_FIRST_INPUT"
+[ ! -e "$CX_FIRST_OUTPUT" ] || rm -f "$CX_FIRST_OUTPUT"
+vdgg_executor_run STEP_3_AI "$CX_FIRST_INPUT" "$CX_FIRST_OUTPUT" >/dev/null 2>&1
+CX_STATUS=$?
+assert_exit_code 0 "$CX_STATUS" "Codex executor_run succeeds on the first spec"
+assert_eq "ran-okexec" "$(cat "$CX_FIRST_OUTPUT")" "Codex first spec's output is captured"
+
+printf '3: failexec | okexec\n' > "$VDGG_CONFIG_DIR/formations/first-fail.conf"
+export VDGG_FORMATION=first-fail
+CX_CAS_INPUT="$TMPDIR_VDGG/cx-cas-input.md"
+CX_CAS_OUTPUT="$TMPDIR_VDGG/cx-cas-output.md"
+printf 'input\n' > "$CX_CAS_INPUT"
+[ ! -e "$CX_CAS_OUTPUT" ] || rm -f "$CX_CAS_OUTPUT"
+vdgg_executor_run STEP_3_AI "$CX_CAS_INPUT" "$CX_CAS_OUTPUT" 2>/tmp/vdgg-test-codex-fallback.err
+CX_CAS_STATUS=$?
+assert_exit_code 0 "$CX_CAS_STATUS" "Codex executor_run cascades on spec-1 failure"
+assert_eq "ran-okexec" "$(cat "$CX_CAS_OUTPUT")" "Codex cascade captures spec-2 output"
+assert_contains "$(cat /tmp/vdgg-test-codex-fallback.err)" "spec 1/2 (failexec) failed" "Codex cascade logs the failed spec"
+
+printf '3: emptyexec | okexec\n' > "$VDGG_CONFIG_DIR/formations/empty-output.conf"
+export VDGG_FORMATION=empty-output
+CX_EMPTY_INPUT="$TMPDIR_VDGG/cx-empty-input.md"
+CX_EMPTY_OUTPUT="$TMPDIR_VDGG/cx-empty-output.md"
+printf 'input\n' > "$CX_EMPTY_INPUT"
+[ ! -e "$CX_EMPTY_OUTPUT" ] || rm -f "$CX_EMPTY_OUTPUT"
+vdgg_executor_run STEP_3_AI "$CX_EMPTY_INPUT" "$CX_EMPTY_OUTPUT" >/dev/null 2>&1
+CX_EMPTY_STATUS=$?
+assert_exit_code 0 "$CX_EMPTY_STATUS" "Codex executor_run cascades on empty-output"
+assert_eq "ran-okexec" "$(cat "$CX_EMPTY_OUTPUT")" "Codex cascade captures spec-2 after empty-output"
+
+printf '3: failexec | failexec\n' > "$VDGG_CONFIG_DIR/formations/all-fail.conf"
+export VDGG_FORMATION=all-fail
+CX_ALLFAIL_INPUT="$TMPDIR_VDGG/cx-allfail-input.md"
+CX_ALLFAIL_OUTPUT="$TMPDIR_VDGG/cx-allfail-output.md"
+printf 'input\n' > "$CX_ALLFAIL_INPUT"
+[ ! -e "$CX_ALLFAIL_OUTPUT" ] || rm -f "$CX_ALLFAIL_OUTPUT"
+vdgg_executor_run STEP_3_AI "$CX_ALLFAIL_INPUT" "$CX_ALLFAIL_OUTPUT" 2>/tmp/vdgg-test-codex-allfail.err
+CX_ALLFAIL_STATUS=$?
+assert_exit_code 3 "$CX_ALLFAIL_STATUS" "Codex executor_run returns the last spec's exit code when all fail"
+assert_contains "$(cat /tmp/vdgg-test-codex-allfail.err)" "all 2 fallback spec(s) failed" "Codex logs the total on total failure"
+unset VDGG_FORMATION
+
 cat > "$TMPDIR_VDGG/bad-grill.md" <<'EOF'
 ## Goal
 goal

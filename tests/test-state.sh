@@ -229,3 +229,122 @@ vdgg_formation_preflight bad-magi >/dev/null 2>&1
 STATUS=$?
 set -e
 assert_exit_code 1 "$STATUS" "unknown executor on a MAGI seat is rejected"
+
+# --- Fallback list on the '|' separator --------------------------------------
+# A seat can list up to 5 space-separated specs joined by '|'; the resolver
+# returns the first, `_all` returns each in order, and both preflight and
+# executor_run walk the list end-to-end.
+mkdir -p "$TMPDIR_VDGG/bin"
+EXEC_OK="$TMPDIR_VDGG/bin/exec-ok"
+EXEC_FAIL="$TMPDIR_VDGG/bin/exec-fail"
+EXEC_EMPTY="$TMPDIR_VDGG/bin/exec-empty"
+printf '#!/bin/sh\nprintf "ran-%%s\\n" "$VDGG_EXECUTOR_AI" > "$VDGG_EXECUTOR_OUTPUT"\n' > "$EXEC_OK"
+printf '#!/bin/sh\nexit 3\n' > "$EXEC_FAIL"
+printf '#!/bin/sh\n: > "$VDGG_EXECUTOR_OUTPUT"\n' > "$EXEC_EMPTY"
+chmod +x "$EXEC_OK" "$EXEC_FAIL" "$EXEC_EMPTY"
+printf 'COMMAND=%s\n' "$EXEC_OK" > "$VDGG_CONFIG_DIR/executors/okexec.conf"
+printf 'COMMAND=%s\n' "$EXEC_FAIL" > "$VDGG_CONFIG_DIR/executors/failexec.conf"
+printf 'COMMAND=%s\n' "$EXEC_EMPTY" > "$VDGG_CONFIG_DIR/executors/emptyexec.conf"
+
+# 1) resolve_all returns each spec, resolve returns the first, backward compat.
+cat > "$VDGG_CONFIG_DIR/formations/fallback-3.conf" <<'CONF'
+3: okexec | failexec | okexec
+CONF
+ALL_SPECS=$(vdgg_formation_resolve_all STEP_3_AI fallback-3 | tr '\n' ',')
+assert_eq "okexec,failexec,okexec," "$ALL_SPECS" "resolve_all returns every spec in fallback order"
+assert_eq "okexec" "$(vdgg_formation_resolve STEP_3_AI fallback-3)" "resolve keeps single-spec contract for the primary"
+
+# 2) preflight rejects 'inline'/'primary' anywhere in the tail.
+printf '3: okexec | primary\n' > "$VDGG_CONFIG_DIR/formations/tail-primary.conf"
+set +e
+vdgg_formation_preflight tail-primary >/dev/null 2>&1
+STATUS=$?
+set -e
+assert_exit_code 1 "$STATUS" "'primary'/'inline' is refused as a fallback spec"
+
+# 3) preflight rejects the empty middle spec.
+printf '3: okexec ||  okexec\n' > "$VDGG_CONFIG_DIR/formations/empty-mid.conf"
+set +e
+vdgg_formation_preflight empty-mid >/dev/null 2>&1
+STATUS=$?
+set -e
+assert_exit_code 1 "$STATUS" "empty spec in a fallback list is refused"
+
+# 4) preflight rejects six specs (cap is 5).
+printf '3: okexec | okexec | okexec | okexec | okexec | okexec\n' > "$VDGG_CONFIG_DIR/formations/too-long.conf"
+set +e
+vdgg_formation_preflight too-long >/dev/null 2>&1
+STATUS=$?
+set -e
+assert_exit_code 1 "$STATUS" "a fallback list longer than 5 specs is refused"
+
+# 5) preflight rejects an unresolvable executor in the tail.
+printf '3: okexec | not-an-exec\n' > "$VDGG_CONFIG_DIR/formations/bad-tail.conf"
+set +e
+vdgg_formation_preflight bad-tail >/dev/null 2>&1
+STATUS=$?
+set -e
+assert_exit_code 1 "$STATUS" "unknown executor in the fallback tail is refused"
+
+# 6) executor_run happy path: first spec succeeds, no fallback fires.
+printf '3: okexec | failexec\n' > "$VDGG_CONFIG_DIR/formations/first-ok.conf"
+export VDGG_FORMATION=first-ok
+FIRST_INPUT="$TMPDIR_VDGG/first-input.md"
+FIRST_OUTPUT="$TMPDIR_VDGG/first-output.md"
+printf 'input\n' > "$FIRST_INPUT"
+[ ! -e "$FIRST_OUTPUT" ] || rm -f "$FIRST_OUTPUT"
+set +e
+vdgg_executor_run STEP_3_AI "$FIRST_INPUT" "$FIRST_OUTPUT" >/dev/null 2>&1
+STATUS=$?
+set -e
+assert_exit_code 0 "$STATUS" "executor_run succeeds on the first spec"
+assert_eq "ran-okexec" "$(cat "$FIRST_OUTPUT")" "the first spec's output is captured"
+rm -f "$FIRST_OUTPUT"
+
+# 7) first spec fails (exit 3), second succeeds — cascade advances.
+printf '3: failexec | okexec\n' > "$VDGG_CONFIG_DIR/formations/first-fail.conf"
+export VDGG_FORMATION=first-fail
+CAS_INPUT="$TMPDIR_VDGG/cas-input.md"
+CAS_OUTPUT="$TMPDIR_VDGG/cas-output.md"
+printf 'input\n' > "$CAS_INPUT"
+[ ! -e "$CAS_OUTPUT" ] || rm -f "$CAS_OUTPUT"
+set +e
+vdgg_executor_run STEP_3_AI "$CAS_INPUT" "$CAS_OUTPUT" 2>/tmp/vdgg-test-fallback.err
+STATUS=$?
+set -e
+assert_exit_code 0 "$STATUS" "executor_run cascades when spec 1 exits non-zero"
+assert_eq "ran-okexec" "$(cat "$CAS_OUTPUT")" "cascade captures the second spec's output"
+assert_contains "$(cat /tmp/vdgg-test-fallback.err)" "spec 1/2 (failexec) failed" "cascade logs which spec failed"
+assert_contains "$(cat /tmp/vdgg-test-fallback.err)" "spec 2/2 (okexec) succeeded" "cascade logs which spec won"
+rm -f "$CAS_OUTPUT"
+
+# 8) first spec exits 0 but produces empty output — treated as failure, cascade.
+printf '3: emptyexec | okexec\n' > "$VDGG_CONFIG_DIR/formations/empty-output.conf"
+export VDGG_FORMATION=empty-output
+EMPTY_INPUT="$TMPDIR_VDGG/empty-input.md"
+EMPTY_OUTPUT="$TMPDIR_VDGG/empty-output.md"
+printf 'input\n' > "$EMPTY_INPUT"
+[ ! -e "$EMPTY_OUTPUT" ] || rm -f "$EMPTY_OUTPUT"
+set +e
+vdgg_executor_run STEP_3_AI "$EMPTY_INPUT" "$EMPTY_OUTPUT" 2>/tmp/vdgg-test-fallback-empty.err
+STATUS=$?
+set -e
+assert_exit_code 0 "$STATUS" "executor_run cascades when spec 1 produces no output"
+assert_eq "ran-okexec" "$(cat "$EMPTY_OUTPUT")" "cascade captures spec 2 when spec 1 wrote nothing"
+assert_contains "$(cat /tmp/vdgg-test-fallback-empty.err)" "produced no output" "cascade names the empty-output reason"
+rm -f "$EMPTY_OUTPUT"
+
+# 9) all specs fail — surface a non-zero return with the last exit code.
+printf '3: failexec | failexec\n' > "$VDGG_CONFIG_DIR/formations/all-fail.conf"
+export VDGG_FORMATION=all-fail
+ALLFAIL_INPUT="$TMPDIR_VDGG/allfail-input.md"
+ALLFAIL_OUTPUT="$TMPDIR_VDGG/allfail-output.md"
+printf 'input\n' > "$ALLFAIL_INPUT"
+[ ! -e "$ALLFAIL_OUTPUT" ] || rm -f "$ALLFAIL_OUTPUT"
+set +e
+vdgg_executor_run STEP_3_AI "$ALLFAIL_INPUT" "$ALLFAIL_OUTPUT" 2>/tmp/vdgg-test-fallback-allfail.err
+STATUS=$?
+set -e
+assert_exit_code 3 "$STATUS" "executor_run returns the last spec's non-zero exit when the whole list fails"
+assert_contains "$(cat /tmp/vdgg-test-fallback-allfail.err)" "all 2 fallback spec(s) failed" "cascade names the total on final failure"
+unset VDGG_FORMATION
