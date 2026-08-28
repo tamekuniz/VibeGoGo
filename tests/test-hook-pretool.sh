@@ -398,36 +398,20 @@ assert_file_not_exists "$TMPDIR_VDGG/.claude/.vdgg-error-pending" "ack gate: fla
 LESSONS_REQ="$TMPDIR_VDGG/tasks/vdgg/test-id/requirements.md"
 ADVANCE_CMD='# [VibesDeGoGo! Step 3 Start] step=3, phase=investigating, loop=0\nvdgg_state_advance 3 investigating'
 
+# The 3-section prefix is identical across the 4 cases below; hoisting it into a
+# single variable keeps each case focused on the '## Lessons Applied' shape it
+# actually exercises.
+REQ_COMMON=$'## Goal\ngoal\n\n## Constraints\nnone\n\n## Acceptance criteria\nnone\n'
+
 # Case 1: requirements.md without a '## Lessons Applied' heading -> blocked.
 write_state requirements 2
-cat > "$LESSONS_REQ" <<'EOF'
-## Goal
-goal
-
-## Constraints
-none
-
-## Acceptance criteria
-none
-EOF
+printf '%s' "$REQ_COMMON" > "$LESSONS_REQ"
 STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"'"$ADVANCE_CMD"'"}}')
 assert_exit_code 2 "$STATUS" "Step 3 gate: missing '## Lessons Applied' heading is blocked"
 
 # Case 2: '## Lessons Applied' with a non-empty body -> allowed.
 write_state requirements 2
-cat > "$LESSONS_REQ" <<'EOF'
-## Goal
-goal
-
-## Constraints
-none
-
-## Acceptance criteria
-none
-
-## Lessons Applied
-None applicable
-EOF
+{ printf '%s' "$REQ_COMMON"; printf '\n## Lessons Applied\nNone applicable\n'; } > "$LESSONS_REQ"
 STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"'"$ADVANCE_CMD"'"}}')
 assert_exit_code 0 "$STATUS" "Step 3 gate: '## Lessons Applied' with non-empty body passes"
 
@@ -435,20 +419,7 @@ assert_exit_code 0 "$STATUS" "Step 3 gate: '## Lessons Applied' with non-empty b
 # or before the next heading) -> blocked. Prevents the "heading-only" escape
 # hatch where the writer taps the header but skips the actual review.
 write_state requirements 2
-cat > "$LESSONS_REQ" <<'EOF'
-## Goal
-goal
-
-## Constraints
-none
-
-## Acceptance criteria
-none
-
-## Lessons Applied
-
-
-EOF
+{ printf '%s' "$REQ_COMMON"; printf '\n## Lessons Applied\n\n\n'; } > "$LESSONS_REQ"
 STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"'"$ADVANCE_CMD"'"}}')
 assert_exit_code 2 "$STATUS" "Step 3 gate: '## Lessons Applied' with an empty body is blocked"
 
@@ -457,21 +428,7 @@ assert_exit_code 2 "$STATUS" "Step 3 gate: '## Lessons Applied' with an empty bo
 # the misordering where Lessons Applied is written last but with no body before
 # a trailing section like '## Notes'.
 write_state requirements 2
-cat > "$LESSONS_REQ" <<'EOF'
-## Goal
-goal
-
-## Constraints
-none
-
-## Acceptance criteria
-none
-
-## Lessons Applied
-
-## Notes
-free-form
-EOF
+{ printf '%s' "$REQ_COMMON"; printf '\n## Lessons Applied\n\n## Notes\nfree-form\n'; } > "$LESSONS_REQ"
 STATUS=$(run_hook '{"tool_name":"Bash","cwd":"'"$TMPDIR_VDGG"'","tool_input":{"command":"'"$ADVANCE_CMD"'"}}')
 assert_exit_code 2 "$STATUS" "Step 3 gate: '## Lessons Applied' followed by another heading with no body between is blocked"
 
