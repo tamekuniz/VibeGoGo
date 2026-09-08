@@ -77,6 +77,10 @@ The executor receives `VDGG_EXECUTOR_FORMATION`, `VDGG_EXECUTOR_AI`, `VDGG_EXECU
 
 With no Formation selected, every step runs inline; `.vdgg-target` `REVIEW_COMMAND` still configures the Step 7 review.
 
+### ChatGPT Chat + local Qwen Formation
+
+For `chatgpt-qwen` or `chatgpt-web`, follow [ChatGPT/Qwen integration](references/chatgpt-qwen.md). The ChatGPT executor waits for this host agent to service its request using the in-app browser and `codex-with-chatgpt`; it does not drive a browser by itself. Never wait on the executor without servicing the request. Check the visible `6 Pro` model and actual workspace before relaying a response. Existing state, allowlist and review gates remain mandatory.
+
 ### Local llama-server executors
 
 When a Formation assigns a Step to an executor backed by a locally-hosted `llama-server` (llama.cpp), VDGG ships two helpers so the server configuration lives in one declarative file instead of being scattered across `~/.zshrc`, launchd plists, and executor wrapper scripts:
